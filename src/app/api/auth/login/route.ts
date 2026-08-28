@@ -2,9 +2,11 @@ import { NextResponse } from "next/server";
 import {
   COOKIE_MAX_AGE,
   COOKIE_NAME,
+  authenticate,
   signSession,
-  verifyCredentials,
 } from "@/lib/auth";
+
+export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   let body: { username?: unknown; password?: unknown };
@@ -18,11 +20,12 @@ export async function POST(request: Request) {
   if (!username || !password) {
     return NextResponse.json({ error: "missing credentials" }, { status: 400 });
   }
-  if (!verifyCredentials(username, password)) {
+  const user = await authenticate(username, password);
+  if (!user) {
     return NextResponse.json({ error: "invalid credentials" }, { status: 401 });
   }
-  const token = await signSession(username);
-  const res = NextResponse.json({ ok: true, username });
+  const token = await signSession(user);
+  const res = NextResponse.json({ ok: true, username: user.username, id: user.id });
   res.cookies.set(COOKIE_NAME, token, {
     httpOnly: true,
     sameSite: "lax",
