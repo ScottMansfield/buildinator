@@ -3,47 +3,108 @@ import type {
   GrokBuildAdapter,
   Project,
   SessionDetail,
+  SessionShare,
   SessionSummary,
+  SessionUser,
+  ShareRole,
 } from "./types";
 
 /**
- * v1 stub. Will speak Agent Client Protocol to a remote grok host:
- *   session/new, session/load, session/prompt, session/update
- * plus xAI extensions (rename, rewind, compact, fork).
+ * Remote grok ACP stub.
  *
- * Transport is still open (stdio ACP vs HTTP grok server vs scanning
- * the remote session directory). See QUESTIONS.md.
+ * Grok / ACP MUST bind loopback only:
+ *   GROK_ACP_URL=http://127.0.0.1:<port>
+ * Never publish that port. The HTTPS web UI is the only internet-facing
+ * socket. Local IPC can stay ACP-on-loopback; this adapter will speak
+ * session/new, session/load, session/prompt, session/update plus xAI
+ * extensions (rename, rewind, compact, fork) once spawn is wired.
+ *
+ * GROK_REMOTE_URL is accepted as a fallback alias.
  */
 export class RemoteGrokAdapter implements GrokBuildAdapter {
-  constructor(private readonly remoteUrl?: string) {}
+  constructor(private readonly acpUrl?: string) {}
 
   private fail(): never {
-    const where = this.remoteUrl ?? "(no GROK_REMOTE_URL)";
+    const where = this.acpUrl ?? "(no GROK_ACP_URL)";
     throw new Error(
-      `RemoteGrokAdapter is not implemented in v0. ` +
-        `Set GROK_ADAPTER=mock or implement ACP against ${where}.`,
+      `RemoteGrokAdapter is not implemented. Grok ACP is a loopback sidecar ` +
+        `(${where}) and is not spawned yet. Set GROK_ADAPTER=mock.`,
     );
   }
 
-  listProjects(): Promise<Project[]> {
+  listProjects(_user: SessionUser): Promise<Project[]> {
     return this.fail();
   }
-  listSessions(_projectId?: string): Promise<SessionSummary[]> {
+  listOwnedProjects(_user: SessionUser): Promise<Project[]> {
     return this.fail();
   }
-  getSession(_id: string): Promise<SessionDetail | null> {
+  listSessions(_user: SessionUser, _projectId?: string): Promise<SessionSummary[]> {
     return this.fail();
   }
-  createSession(_projectId: string, _title?: string): Promise<SessionDetail> {
+  getSession(_user: SessionUser, _id: string): Promise<SessionDetail | null> {
     return this.fail();
   }
-  sendPrompt(_sessionId: string, _prompt: string): Promise<SessionDetail> {
+  createSession(
+    _user: SessionUser,
+    _projectId: string,
+    _title?: string,
+  ): Promise<SessionDetail> {
     return this.fail();
   }
-  listArtifacts(_sessionId: string): Promise<Artifact[]> {
+  sendPrompt(
+    _user: SessionUser,
+    _sessionId: string,
+    _prompt: string,
+  ): Promise<SessionDetail> {
     return this.fail();
   }
-  renameSession(_sessionId: string, _title: string): Promise<SessionSummary> {
+  listArtifacts(_user: SessionUser, _sessionId: string): Promise<Artifact[]> {
+    return this.fail();
+  }
+  renameSession(
+    _user: SessionUser,
+    _sessionId: string,
+    _title: string,
+  ): Promise<SessionSummary> {
+    return this.fail();
+  }
+  forkSession(_user: SessionUser, _sessionId: string): Promise<SessionDetail> {
+    return this.fail();
+  }
+  resumeSession(_user: SessionUser, _sessionId: string): Promise<SessionDetail> {
+    return this.fail();
+  }
+  compactSession(_user: SessionUser, _sessionId: string): Promise<SessionDetail> {
+    return this.fail();
+  }
+  rewindSession(_user: SessionUser, _sessionId: string): Promise<SessionDetail> {
+    return this.fail();
+  }
+  shareSession(
+    _user: SessionUser,
+    _sessionId: string,
+    _username: string,
+    _role: ShareRole,
+  ): Promise<SessionShare> {
+    return this.fail();
+  }
+  listShares(_user: SessionUser, _sessionId: string): Promise<SessionShare[]> {
+    return this.fail();
+  }
+  revokeShare(
+    _user: SessionUser,
+    _sessionId: string,
+    _shareId: string,
+  ): Promise<void> {
+    return this.fail();
+  }
+  revokeAllShares(_user: SessionUser, _sessionId: string): Promise<void> {
+    return this.fail();
+  }
+  deleteSession(_user: SessionUser, _sessionId: string): Promise<void> {
+    return this.fail();
+  }
+  destroySandbox(_user: SessionUser, _projectId: string): Promise<void> {
     return this.fail();
   }
 }
