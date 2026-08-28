@@ -1,0 +1,468 @@
+@import "tailwindcss";
+
+html[data-theme="default"] {
+  --bg: #0c0e12;
+  --bg-elev: #141820;
+  --bg-elev-2: #1a2030;
+  --border: #2a3140;
+  --text: #e8eaed;
+  --muted: #8b93a1;
+  --accent: #f0a020;
+  --accent-2: #5b9fd4;
+  --danger: #e05a5a;
+  --ok: #4ecf7a;
+  --user: #1c3358;
+  --tool: #1a2c22;
+  --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --radius: 10px;
+  --scanline: 0;
+  --shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+
+html[data-theme="tui"] {
+  --bg: #050805;
+  --bg-elev: #0a120a;
+  --bg-elev-2: #0e1a0e;
+  --border: #1e4a1e;
+  --text: #c6f2c6;
+  --muted: #5a9a5a;
+  --accent: #5dff5d;
+  --accent-2: #ffe066;
+  --danger: #ff6b6b;
+  --ok: #5dff5d;
+  --user: #143014;
+  --tool: #0a2a2a;
+  --font: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --radius: 0px;
+  --scanline: 1;
+  --shadow: none;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+button,
+input,
+textarea {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+
+a {
+  color: var(--accent);
+}
+
+html[data-theme="tui"] body::after {
+  content: "";
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0px,
+    transparent 2px,
+    rgba(0, 0, 0, 0.14) 2px,
+    rgba(0, 0, 0, 0.14) 3px
+  );
+  z-index: 50;
+}
+
+html[data-theme="tui"] body::before {
+  content: "";
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  box-shadow: inset 0 0 120px rgba(0, 0, 0, 0.45);
+  z-index: 49;
+}
+
+.shell {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: 100%;
+  min-height: 100%;
+}
+
+.chrome {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+
+.chrome-title {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+}
+
+.chrome-spacer {
+  flex: 1;
+}
+
+.panes {
+  display: grid;
+  grid-template-columns: 280px 1fr 320px;
+  min-height: 0;
+}
+
+.panes.artifacts-collapsed {
+  grid-template-columns: 280px 1fr 36px;
+}
+
+.pane {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+}
+
+.pane:last-child {
+  border-right: none;
+  border-left: 1px solid var(--border);
+}
+
+.pane-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.status-bar {
+  display: flex;
+  gap: 16px;
+  padding: 4px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-elev);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.btn {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--bg-elev-2);
+  color: var(--text);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.btn-accent {
+  background: var(--accent);
+  color: #111;
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.btn-accent:hover {
+  color: #111;
+  filter: brightness(1.08);
+}
+
+.btn-ghost {
+  background: transparent;
+}
+
+.input,
+.textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+}
+
+.textarea {
+  resize: none;
+  min-height: 72px;
+}
+
+.login-wrap {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.login-card {
+  width: min(420px, 100%);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 28px 24px;
+}
+
+.login-card h1 {
+  margin: 0 0 4px;
+  color: var(--accent);
+  letter-spacing: 0.06em;
+}
+
+.login-card p {
+  margin: 0 0 20px;
+  color: var(--muted);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.field span {
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.error {
+  color: var(--danger);
+  min-height: 1.2em;
+  font-size: 13px;
+}
+
+.session-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.session-item:hover,
+.session-item.active {
+  background: var(--bg-elev-2);
+}
+
+.session-item.active {
+  outline: 1px solid var(--accent);
+}
+
+.session-title {
+  display: block;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-meta {
+  display: flex;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.badge {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.badge.idle { color: var(--muted); }
+.badge.running { color: var(--accent-2); }
+.badge.error { color: var(--danger); }
+
+.project-group {
+  border-bottom: 1px solid var(--border);
+}
+
+.project-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  padding: 8px 10px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.project-cwd {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  padding: 0 10px 8px;
+  word-break: break-all;
+}
+
+.msg {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.msg.user {
+  background: var(--user);
+}
+
+.msg.assistant {
+  background: transparent;
+}
+
+.msg.system {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.msg-role {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  margin-bottom: 4px;
+}
+
+.msg.user .msg-role { color: var(--accent-2); }
+
+.msg-body {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.msg-body code {
+  font-family: var(--mono);
+  background: var(--bg-elev-2);
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+
+.tool-card {
+  margin: 8px 14px;
+  border: 1px solid var(--border);
+  background: var(--tool);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.tool-card header {
+  display: flex;
+  justify-content: space-between;
+  color: var(--ok);
+  margin-bottom: 6px;
+}
+
+.artifact {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin: 8px;
+  background: var(--bg-elev);
+  overflow: hidden;
+}
+
+.artifact header {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--accent-2);
+}
+
+.artifact pre {
+  margin: 0;
+  padding: 10px;
+  overflow: auto;
+  max-height: 240px;
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.rail {
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  color: var(--muted);
+  cursor: pointer;
+  background: var(--bg-elev);
+  border: none;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-size: 11px;
+}
+
+.empty {
+  color: var(--muted);
+  padding: 24px;
+  text-align: center;
+}
+
+html[data-theme="tui"] .chrome-title::before {
+  content: "[ ";
+}
+html[data-theme="tui"] .chrome-title::after {
+  content: " ]";
+}
+html[data-theme="tui"] .btn,
+html[data-theme="tui"] .input,
+html[data-theme="tui"] .textarea,
+html[data-theme="tui"] .login-card,
+html[data-theme="tui"] .artifact,
+html[data-theme="tui"] .tool-card,
+html[data-theme="tui"] .session-item.active {
+  border-radius: 0;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
