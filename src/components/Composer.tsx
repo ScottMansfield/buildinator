@@ -56,7 +56,7 @@ export function Composer({
         rows={3}
         value={value}
         disabled={disabled}
-        placeholder={placeholder ?? "Message grok\u2026  /help"}
+        placeholder={placeholder ?? "Message grok...  /help"}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={onKeyDown}
       />
@@ -69,7 +69,7 @@ export function Composer({
           fontSize: 12,
         }}
       >
-        <span>Enter to send \u00b7 Shift+Enter newline \u00b7 / for commands</span>
+        <span>Enter to send | Shift+Enter newline | / for commands</span>
         <button className="btn btn-accent" type="submit" disabled={disabled}>
           send
         </button>

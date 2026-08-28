@@ -57,7 +57,7 @@ export function MessageList({
         ) : (
           <div key={item.tool.id} className="tool-card">
             <header>
-              <span>tool \u00b7 {item.tool.name}</span>
+              <span>{"tool " + item.tool.name}</span>
               <span className={"badge " + item.tool.status}>
                 {item.tool.status}
               </span>
