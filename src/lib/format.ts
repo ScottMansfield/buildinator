@@ -54,5 +54,5 @@ export function modelStatusLine(
   variant: string,
   approval = "always-approve",
 ): string {
-  return `${prettyModel(model)} (${variant}) \u00b7 ${approval}`;
+  return `${prettyModel(model)} (${variant}) · ${approval}`;
 }

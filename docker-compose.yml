@@ -1,0 +1,19 @@
+# Self-contained single-VM deploy.
+# Internet-facing: the web service. Put TLS (Caddy/nginx) on 443 in front.
+# Mapping 3000 is enough for LAN. Grok ACP binds 127.0.0.1 only — do not publish it.
+
+services:
+  web:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      AUTH_SECRET: ${AUTH_SECRET:-dev-only-change-me-please-use-32b!!}
+      GROK_ADAPTER: ${GROK_ADAPTER:-mock}
+      GROK_ACP_URL: ${GROK_ACP_URL:-http://127.0.0.1:8080}
+    volumes:
+      - buildinator-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  buildinator-data:
