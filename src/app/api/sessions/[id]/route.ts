@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { getAdapter } from "@/lib/get-adapter";
 import { getSessionUser } from "@/lib/auth";
+import { jsonError } from "@/lib/http";
+
+export const runtime = "nodejs";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -10,7 +13,7 @@ export async function GET(_request: Request, ctx: Ctx) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await ctx.params;
-  const session = await getAdapter().getSession(id);
+  const session = await getAdapter().getSession(user, id);
   if (!session) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
@@ -33,10 +36,23 @@ export async function PATCH(request: Request, ctx: Ctx) {
     return NextResponse.json({ error: "title required" }, { status: 400 });
   }
   try {
-    const session = await getAdapter().renameSession(id, body.title);
+    const session = await getAdapter().renameSession(user, id, body.title);
     return NextResponse.json({ session });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "failed";
-    return NextResponse.json({ error: message }, { status: 404 });
+    return jsonError(err);
+  }
+}
+
+export async function DELETE(_request: Request, ctx: Ctx) {
+  const user = await getSessionUser();
+  if (!user) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+  const { id } = await ctx.params;
+  try {
+    await getAdapter().deleteSession(user, id);
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    return jsonError(err);
   }
 }

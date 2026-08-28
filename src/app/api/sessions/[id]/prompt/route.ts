@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { getAdapter } from "@/lib/get-adapter";
 import { getSessionUser } from "@/lib/auth";
+import { jsonError } from "@/lib/http";
+
+export const runtime = "nodejs";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -20,10 +23,9 @@ export async function POST(request: Request, ctx: Ctx) {
     return NextResponse.json({ error: "prompt required" }, { status: 400 });
   }
   try {
-    const session = await getAdapter().sendPrompt(id, body.prompt.trim());
+    const session = await getAdapter().sendPrompt(user, id, body.prompt.trim());
     return NextResponse.json({ session });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "failed";
-    return NextResponse.json({ error: message }, { status: 400 });
+    return jsonError(err);
   }
 }

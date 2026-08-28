@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { getAdapter } from "@/lib/get-adapter";
 import { getSessionUser } from "@/lib/auth";
+import { jsonError } from "@/lib/http";
+
+export const runtime = "nodejs";
 
 export async function GET(request: Request) {
   const user = await getSessionUser();
@@ -8,8 +11,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const projectId = new URL(request.url).searchParams.get("projectId") ?? undefined;
-  const adapter = getAdapter();
-  const sessions = await adapter.listSessions(projectId);
+  const sessions = await getAdapter().listSessions(user, projectId);
   return NextResponse.json({ sessions });
 }
 
@@ -29,10 +31,9 @@ export async function POST(request: Request) {
   }
   const title = typeof body.title === "string" ? body.title : undefined;
   try {
-    const session = await getAdapter().createSession(body.projectId, title);
+    const session = await getAdapter().createSession(user, body.projectId, title);
     return NextResponse.json({ session }, { status: 201 });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "failed";
-    return NextResponse.json({ error: message }, { status: 400 });
+    return jsonError(err);
   }
 }
