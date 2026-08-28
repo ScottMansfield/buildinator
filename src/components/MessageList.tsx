@@ -1,6 +1,7 @@
 "use client";
 
 import type { ChatMessage, ToolCall } from "@/lib/types";
+import { clockTime } from "@/lib/format";
 
 function RichText({ text }: { text: string }) {
   const parts = text.split(/(`[^`]+`)/g);
@@ -15,6 +16,25 @@ function RichText({ text }: { text: string }) {
       )}
     </div>
   );
+}
+
+function toolActionLabel(tool: ToolCall): string {
+  const path = tool.input.path || tool.input.pattern || tool.input.command || "";
+  switch (tool.name) {
+    case "glob_search":
+    case "web_search":
+      return path ? `Searched ${path}` : "Searched 10 websites";
+    case "read_file":
+      return path ? `Read ${path}` : "Read file";
+    case "write_file":
+      return path ? `Wrote ${path}` : "Wrote file";
+    case "edit_file":
+      return path ? `Edited ${path}` : "Edited file";
+    case "bash":
+      return path ? `Ran ${path}` : "Ran command";
+    default:
+      return tool.name.replace(/_/g, " ");
+  }
 }
 
 export function MessageList({
@@ -47,36 +67,60 @@ export function MessageList({
   }
 
   return (
-    <div style={{ overflow: "auto", flex: 1 }} role="log" aria-live="polite">
-      {items.map((item) =>
-        item.kind === "msg" ? (
-          <article key={item.msg.id} className={"msg " + item.msg.role}>
-            <div className="msg-role">{item.msg.role}</div>
-            <RichText text={item.msg.content} />
-          </article>
-        ) : (
+    <div className="msg-log" role="log" aria-live="polite">
+      {items.map((item, idx) => {
+        const prev = items[idx - 1];
+        const showSep =
+          item.kind === "msg" &&
+          item.msg.role === "user" &&
+          idx > 0 &&
+          !(prev?.kind === "msg" && prev.msg.role === "user");
+        if (item.kind === "msg") {
+          if (item.msg.role === "action") {
+            return (
+              <div key={item.msg.id} className="action-line">
+                <span className="action-diamond" aria-hidden>
+                  ◆
+                </span>
+                {item.msg.content}
+              </div>
+            );
+          }
+          return (
+            <article key={item.msg.id} className={"msg " + item.msg.role}>
+              {showSep ? <div className="turn-sep" /> : null}
+              {item.msg.role === "user" ? (
+                <div className="msg-user-row">
+                  <span className="msg-gt" aria-hidden>
+                    &gt;
+                  </span>
+                  <RichText text={item.msg.content} />
+                  <span className="msg-time">{clockTime(item.msg.createdAt)}</span>
+                </div>
+              ) : (
+                <>
+                  <div className="msg-role">{item.msg.role}</div>
+                  <RichText text={item.msg.content} />
+                </>
+              )}
+            </article>
+          );
+        }
+        return (
           <div key={item.tool.id} className="tool-card">
-            <header>
-              <span>{"tool " + item.tool.name}</span>
-              <span className={"badge " + item.tool.status}>
-                {item.tool.status}
+            <div className="action-line">
+              <span className="action-diamond" aria-hidden>
+                ◆
               </span>
-            </header>
-            <div>
-              {Object.entries(item.tool.input).map(([k, v]) => (
-                <div key={k}>
-                  {k}: {v}
-                </div>
-              ))}
-              {item.tool.output ? (
-                <div style={{ marginTop: 6, color: "var(--muted)" }}>
-                  {item.tool.output}
-                </div>
-              ) : null}
+              {toolActionLabel(item.tool)}
+              <span className={"badge " + item.tool.status}>{item.tool.status}</span>
             </div>
+            {item.tool.output ? (
+              <div className="tool-output">{item.tool.output}</div>
+            ) : null}
           </div>
-        ),
-      )}
+        );
+      })}
     </div>
   );
 }

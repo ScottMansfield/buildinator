@@ -7,6 +7,7 @@ type Props = {
   onChange: (v: string) => void;
   onSend: (text: string) => void;
   disabled?: boolean;
+  readOnly?: boolean;
   placeholder?: string;
 };
 
@@ -15,13 +16,14 @@ export function Composer({
   onChange,
   onSend,
   disabled,
+  readOnly,
   placeholder,
 }: Props) {
   const ref = useRef<HTMLTextAreaElement>(null);
 
   function submit() {
     const text = value.trim();
-    if (!text || disabled) return;
+    if (!text || disabled || readOnly) return;
     onSend(text);
   }
 
@@ -37,40 +39,44 @@ export function Composer({
     }
   }
 
+  if (readOnly) {
+    return (
+      <div className="composer composer-readonly" aria-live="polite">
+        <span className="composer-gt" aria-hidden>
+          &gt;
+        </span>
+        <span className="composer-readonly-label">read only</span>
+      </div>
+    );
+  }
+
   return (
-    <form
-      onSubmit={onSubmit}
-      style={{
-        padding: 10,
-        borderTop: "1px solid var(--border)",
-        background: "var(--bg-elev)",
-      }}
-    >
-      <label className="sr-only" htmlFor="composer">
-        Message
-      </label>
-      <textarea
-        id="composer"
-        ref={ref}
-        className="textarea"
-        rows={3}
-        value={value}
-        disabled={disabled}
-        placeholder={placeholder ?? "Message grok...  /help"}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={onKeyDown}
-      />
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          marginTop: 8,
-          color: "var(--muted)",
-          fontSize: 12,
-        }}
-      >
-        <span>Enter to send | Shift+Enter newline | / for commands</span>
-        <button className="btn btn-accent" type="submit" disabled={disabled}>
+    <form className="composer" onSubmit={onSubmit}>
+      <div className="composer-line">
+        <span className="composer-gt" aria-hidden>
+          &gt;
+        </span>
+        <label className="sr-only" htmlFor="composer">
+          Message
+        </label>
+        <textarea
+          id="composer"
+          ref={ref}
+          className="textarea composer-input"
+          rows={1}
+          value={value}
+          disabled={disabled}
+          placeholder={placeholder ?? "Message grok  /help"}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={onKeyDown}
+        />
+        {!value && !disabled ? (
+          <span className="block-cursor" aria-hidden />
+        ) : null}
+      </div>
+      <div className="composer-meta">
+        <span>Enter to send · Shift+Enter newline · /help /compact /rewind</span>
+        <button className="btn btn-accent composer-send" type="submit" disabled={disabled}>
           send
         </button>
       </div>

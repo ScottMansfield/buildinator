@@ -1,6 +1,7 @@
 "use client";
 
-import type { Project, SessionDetail } from "@/lib/types";
+import type { AccessRole, Project, SessionDetail } from "@/lib/types";
+import { contextMeter } from "@/lib/format";
 import { MessageList } from "./MessageList";
 import { Composer } from "./Composer";
 
@@ -12,6 +13,8 @@ type Props = {
   onSend: (text: string) => void;
   sending: boolean;
   notice: string | null;
+  role: AccessRole | null;
+  onShare?: () => void;
 };
 
 export function ChatPane({
@@ -22,33 +25,37 @@ export function ChatPane({
   onSend,
   sending,
   notice,
+  role,
+  onShare,
 }: Props) {
+  const readOnly = role === "read";
+  const cwd = session?.projectCwd ?? project?.cwd ?? "";
+  const usedIn = session?.tokenUsage?.input ?? 0;
+  const usedOut = session?.tokenUsage?.output ?? 0;
+
   return (
-    <section className="pane" aria-label="Chat">
-      <div className="pane-header">
-        <span style={{ color: "var(--text)" }}>
-          {session?.title ?? "no session"}
+    <section className="pane chat-pane" aria-label="Chat">
+      <div className="pane-header chat-header">
+        <span className="chat-path">
+          {session ? `main ${cwd}` : "no session"}
         </span>
         {session ? (
-          <span className={"badge " + session.status} style={{ marginLeft: 8 }}>
-            {session.status}
-          </span>
+          <span className={"badge " + session.status}>{session.status}</span>
         ) : null}
-        <span style={{ marginLeft: "auto", fontFamily: "var(--mono)" }}>
-          {project?.cwd ?? ""}
+        {role && role !== "owner" ? (
+          <span className="share-badge">{role === "write" ? "read-write" : "read-only"}</span>
+        ) : null}
+        {role === "owner" && onShare ? (
+          <button type="button" className="btn btn-ghost" onClick={onShare}>
+            share
+          </button>
+        ) : null}
+        <span className="chat-meter">
+          {session ? `${contextMeter(usedIn, usedOut)} | 4/4 ✓` : ""}
         </span>
       </div>
       {notice ? (
-        <div
-          role="status"
-          style={{
-            padding: "8px 12px",
-            borderBottom: "1px solid var(--border)",
-            color: "var(--accent-2)",
-            fontFamily: "var(--mono)",
-            fontSize: 12,
-          }}
-        >
+        <div className="notice" role="status">
           {notice}
         </div>
       ) : null}
@@ -62,6 +69,7 @@ export function ChatPane({
         onChange={onDraft}
         onSend={onSend}
         disabled={!session || sending}
+        readOnly={Boolean(session) && readOnly}
       />
     </section>
   );
