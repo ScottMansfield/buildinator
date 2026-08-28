@@ -2,29 +2,38 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/client";
-import type { Project, SessionDetail, SessionSummary } from "@/lib/types";
+import { can } from "@/lib/acl";
+import { modelStatusLine } from "@/lib/format";
+import type {
+  Project,
+  SessionDetail,
+  SessionShare,
+  SessionSummary,
+  SessionUser,
+  ShareRole,
+} from "@/lib/types";
 import { Sidebar } from "./Sidebar";
 import { ChatPane } from "./ChatPane";
 import { ArtifactsPane } from "./ArtifactsPane";
 import { ThemeToggle } from "./ThemeToggle";
 import { useTheme } from "./ThemeProvider";
+import { SharePanel } from "./SharePanel";
 
 const HELP = [
   "/help — this list",
-  "/new — create a session in the current project",
-  "/rename <title> — rename the current session",
-  "/resume — stub (v1: session/load)",
-  "/fork — stub (v1: fork ACP session)",
-  "/rewind — stub (v1: rewind)",
-  "/compact — stub (v1: compact)",
+  "/rename <title> — rename the current session (write)",
+  "/rewind — rewind last turn (write, stub)",
+  "/compact — compact transcript (write, stub)",
+  "resume / fork live on the session row, not as slashes",
   "keys: j/k sessions · n new · [ ] artifacts · t theme · / composer",
 ].join("\n");
 
-type Props = { username: string };
+type Props = { user: SessionUser };
 
-export function AppShell({ username }: Props) {
+export function AppShell({ user }: Props) {
   const { toggle: toggleTheme } = useTheme();
   const [projects, setProjects] = useState<Project[]>([]);
+  const [owned, setOwned] = useState<Project[]>([]);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<SessionDetail | null>(null);
@@ -34,18 +43,22 @@ export function AppShell({ username }: Props) {
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
 
   const selectedProject = useMemo(
     () => projects.find((p) => p.id === detail?.projectId),
     [projects, detail],
   );
 
+  const role = detail?.myRole ?? null;
+
   const refreshLists = useCallback(async () => {
     const [p, s] = await Promise.all([
-      api<{ projects: Project[] }>("/api/projects"),
+      api<{ projects: Project[]; owned: Project[] }>("/api/projects"),
       api<{ sessions: SessionSummary[] }>("/api/sessions"),
     ]);
     setProjects(p.projects);
+    setOwned(p.owned);
     setSessions(s.sessions);
     return s.sessions;
   }, []);
@@ -54,6 +67,7 @@ export function AppShell({ username }: Props) {
     const data = await api<{ session: SessionDetail }>(`/api/sessions/${id}`);
     setDetail(data.session);
     setSelectedId(id);
+    return data.session;
   }, []);
 
   useEffect(() => {
@@ -83,17 +97,16 @@ export function AppShell({ username }: Props) {
     await refreshLists();
     setDetail(data.session);
     setSelectedId(data.session.id);
-    setNotice("Created new mock session.");
+    setNotice("Created session.");
   }
 
-  async function rename(title: string) {
-    if (!selectedId) return;
-    await api(`/api/sessions/${selectedId}`, {
+  async function rename(id: string, title: string) {
+    await api(`/api/sessions/${id}`, {
       method: "PATCH",
       body: JSON.stringify({ title }),
     });
     await refreshLists();
-    await loadSession(selectedId);
+    if (selectedId === id) await loadSession(id);
     setNotice(`Renamed to ${title}`);
   }
 
@@ -115,6 +128,67 @@ export function AppShell({ username }: Props) {
     }
   }
 
+  async function runAction(id: string, type: "fork" | "resume" | "compact" | "rewind") {
+    const data = await api<{ session: SessionDetail }>(`/api/sessions/${id}/actions`, {
+      method: "POST",
+      body: JSON.stringify({ type }),
+    });
+    await refreshLists();
+    setDetail(data.session);
+    setSelectedId(data.session.id);
+    setNotice(
+      type === "fork"
+        ? `Forked as ${data.session.title}`
+        : type === "resume"
+          ? "Resumed session."
+          : type === "compact"
+            ? "Compacted (stub)."
+            : "Rewound (stub).",
+    );
+  }
+
+  async function deleteSession(id: string) {
+    await api(`/api/sessions/${id}`, { method: "DELETE" });
+    const list = await refreshLists();
+    if (selectedId === id) {
+      const next = list[0];
+      if (next) await loadSession(next.id);
+      else {
+        setDetail(null);
+        setSelectedId(null);
+      }
+    }
+    setNotice("Deleted session.");
+  }
+
+  async function addShare(username: string, shareRole: ShareRole) {
+    if (!selectedId) return;
+    await api(`/api/sessions/${selectedId}/shares`, {
+      method: "POST",
+      body: JSON.stringify({ username, role: shareRole }),
+    });
+    await loadSession(selectedId);
+    await refreshLists();
+  }
+
+  async function revokeShare(shareId: string) {
+    if (!selectedId) return;
+    await api(`/api/sessions/${selectedId}/shares`, {
+      method: "DELETE",
+      body: JSON.stringify({ shareId }),
+    });
+    await loadSession(selectedId);
+  }
+
+  async function revokeAll() {
+    if (!selectedId) return;
+    await api(`/api/sessions/${selectedId}/shares`, {
+      method: "POST",
+      body: JSON.stringify({ revokeAll: true }),
+    });
+    await loadSession(selectedId);
+  }
+
   async function onCommand(text: string) {
     const trimmed = text.trim();
     if (!trimmed.startsWith("/")) {
@@ -129,27 +203,29 @@ export function AppShell({ username }: Props) {
       case "help":
         setNotice(HELP);
         break;
-      case "new": {
-        const projectId = detail?.projectId ?? projects[0]?.id;
-        if (projectId) await createSession(projectId);
-        else setNotice("No project to attach a session to.");
-        break;
-      }
       case "rename":
-        if (!arg) setNotice("Usage: /rename <title>");
-        else await rename(arg);
-        break;
-      case "resume":
-        setNotice("Mock: /resume is a stub. v1 will call session/load.");
-        break;
-      case "fork":
-        setNotice("Mock: /fork is a stub. v1 will fork the ACP session.");
+        if (!can(role, "write")) {
+          setNotice("Read-only: cannot rename.");
+        } else if (!arg) {
+          setNotice("Usage: /rename <title>");
+        } else if (selectedId) {
+          await rename(selectedId, arg);
+        }
         break;
       case "rewind":
-        setNotice("Mock: /rewind is a stub.");
+        if (!can(role, "write") || !selectedId) setNotice("Read-only.");
+        else await runAction(selectedId, "rewind");
         break;
       case "compact":
-        setNotice("Mock: /compact is a stub.");
+        if (!can(role, "write") || !selectedId) setNotice("Read-only.");
+        else await runAction(selectedId, "compact");
+        break;
+      case "resume":
+      case "fork":
+        setNotice(`/${cmd} lives on the session row, not in the composer.`);
+        break;
+      case "new":
+        setNotice("Use the New session button and pick a project you own.");
         break;
       default:
         setNotice(`Unknown command /${cmd}. Try /help.`);
@@ -192,7 +268,9 @@ export function AppShell({ username }: Props) {
       }
       if (e.key === "n") {
         e.preventDefault();
-        const projectId = detail?.projectId ?? projects[0]?.id;
+        const projectId =
+          (detail?.myRole === "owner" ? detail.projectId : undefined) ??
+          owned[0]?.id;
         if (projectId) void createSession(projectId);
       }
       if (e.key === "[") {
@@ -206,7 +284,9 @@ export function AppShell({ username }: Props) {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [sessions, selectedId, detail, projects, loadSession, toggleTheme]);
+  }, [sessions, selectedId, detail, owned, loadSession, toggleTheme]);
+
+  const shares: SessionShare[] = detail?.shares ?? [];
 
   return (
     <div className="shell">
@@ -217,7 +297,7 @@ export function AppShell({ username }: Props) {
         </span>
         <div className="chrome-spacer" />
         <ThemeToggle />
-        <span style={{ color: "var(--muted)" }}>{username}</span>
+        <span style={{ color: "var(--muted)" }}>{user.username}</span>
         <button type="button" className="btn btn-ghost" onClick={() => void logout()}>
           log out
         </button>
@@ -230,10 +310,18 @@ export function AppShell({ username }: Props) {
         <div className={"panes" + (collapsed ? " artifacts-collapsed" : "")}>
           <Sidebar
             projects={projects}
+            owned={owned}
             sessions={sessions}
             selectedId={selectedId}
             onSelect={(id) => void loadSession(id)}
             onNew={(id) => void createSession(id)}
+            onRename={(id, title) => void rename(id, title)}
+            onResume={(id) => void runAction(id, "resume")}
+            onFork={(id) => void runAction(id, "fork")}
+            onShare={(id) => {
+              void loadSession(id).then(() => setShareOpen(true));
+            }}
+            onDelete={(id) => void deleteSession(id)}
             search={search}
             onSearch={setSearch}
           />
@@ -245,6 +333,8 @@ export function AppShell({ username }: Props) {
             onSend={(t) => void onCommand(t)}
             sending={sending}
             notice={notice}
+            role={role}
+            onShare={() => setShareOpen(true)}
           />
           <ArtifactsPane
             artifacts={detail?.artifacts ?? []}
@@ -254,15 +344,21 @@ export function AppShell({ username }: Props) {
         </div>
       )}
       <footer className="status-bar">
-        <span>{detail?.model ?? "grok-4"}</span>
-        <span>{selectedProject?.cwd ?? "no cwd"}</span>
-        <span>
-          tok {detail?.tokenUsage?.input ?? 0}/{detail?.tokenUsage?.output ?? 0}
-        </span>
-        <span style={{ marginLeft: "auto" }}>
-          j/k n [/] t /help · mock adapter
+        <span>j/k n [ ] t · /help</span>
+        <span className="status-model">
+          {detail
+            ? modelStatusLine(detail.model, detail.variant, detail.approval)
+            : "Grok 4.6 (high) · always-approve"}
         </span>
       </footer>
+      <SharePanel
+        open={shareOpen && role === "owner"}
+        shares={shares}
+        onClose={() => setShareOpen(false)}
+        onAdd={addShare}
+        onRevoke={revokeShare}
+        onRevokeAll={revokeAll}
+      />
     </div>
   );
 }
