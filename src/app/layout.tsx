@@ -8,13 +8,13 @@ export const metadata: Metadata = {
   icons: { icon: "/favicon.svg" },
 };
 
-const themeBoot = `(function(){try{var t=localStorage.getItem("buildinator-theme");if(t==="tui"||t==="default")document.documentElement.setAttribute("data-theme",t);}catch(e){}})();`;
+const themeBoot = `(function(){try{var t=localStorage.getItem("buildinator-theme");if(t==="default")t="web";if(t==="tui"||t==="web")document.documentElement.setAttribute("data-theme",t);else document.documentElement.setAttribute("data-theme","tui");}catch(e){document.documentElement.setAttribute("data-theme","tui");}})();`;
 
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" data-theme="default" suppressHydrationWarning>
+    <html lang="en" data-theme="tui" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeBoot }} />
       </head>

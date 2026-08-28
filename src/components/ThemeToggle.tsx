@@ -10,9 +10,9 @@ export function ThemeToggle() {
       className="btn btn-ghost"
       onClick={toggle}
       aria-pressed={theme === "tui"}
-      title="Toggle default / TUI theme (t)"
+      title="Toggle TUI / web theme (t)"
     >
-      {theme === "tui" ? "theme: tui" : "theme: default"}
+      {theme === "tui" ? "theme: tui" : "theme: web"}
     </button>
   );
 }

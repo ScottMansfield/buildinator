@@ -9,7 +9,7 @@ import {
   useState,
 } from "react";
 
-export type ThemeName = "default" | "tui";
+export type ThemeName = "tui" | "web";
 
 const KEY = "buildinator-theme";
 
@@ -25,12 +25,22 @@ function apply(theme: ThemeName) {
   document.documentElement.setAttribute("data-theme", theme);
 }
 
+function readStored(): ThemeName {
+  try {
+    const stored = localStorage.getItem(KEY);
+    if (stored === "default" || stored === "web") return "web";
+    if (stored === "tui") return "tui";
+  } catch {
+    // ignore
+  }
+  return "tui";
+}
+
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<ThemeName>("default");
+  const [theme, setThemeState] = useState<ThemeName>("tui");
 
   useEffect(() => {
-    const stored = localStorage.getItem(KEY);
-    const next: ThemeName = stored === "tui" ? "tui" : "default";
+    const next = readStored();
     setThemeState(next);
     apply(next);
   }, []);
@@ -42,7 +52,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const toggle = useCallback(() => {
-    setTheme(theme === "tui" ? "default" : "tui");
+    setTheme(theme === "tui" ? "web" : "tui");
   }, [setTheme, theme]);
 
   const value = useMemo(() => ({ theme, setTheme, toggle }), [theme, setTheme, toggle]);
