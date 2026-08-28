@@ -1,25 +1,42 @@
-# Questions for the morning
+# Questions
 
-Please answer these so v1 is not a guess.
+Locked 2026-08-28 morning. Answered items stay here so v1.1 does not
+re-litigate them.
 
-1. **Remote host protocol.** Should buildinator talk ACP over stdio to a grok process, talk to a grok HTTP/WebSocket server, or scan `~/.grok/sessions/<encoded-cwd>/<session-id>/` (summary.json + updates.jsonl) on the remote box? Mix of those?
+## Answered
 
-2. **Spawn vs attach.** Should this app spawn `grok`, or only attach to sessions that already exist? If spawn: as a child on the same box, over SSH, or via a grok-host daemon?
+1. **Remote host protocol.** ACP over HTTP to a loopback sidecar:
+   GROK_ACP_URL=http://127.0.0.1:<port>. Never published. The HTTPS
+   web UI is the only internet port. Local IPC can stay ACP-on-loopback.
+2. **Spawn vs attach.** Sidecar on the same VM, bound to 127.0.0.1.
+   Real grok spawn is **not live yet** (expected gap).
+3. **Multi-user.** Multi-tenant even if currently one human. Session
+   storage isolated by user. Owner can share read-only or read-write.
+4. **Where projects come from.** Sandboxes under a buildinator-owned
+   root. No arbitrary host path, no `..`. Cross-project deps are
+   explicit links to other registered projects, mounted at deps/<name>.
+5. **Google SSO.** Hold. Keep username/password.
+6. **Hosting target.** One VM you can resize. Dockerfile / compose.
+   Not Vercel-first.
+7. **Persist mock data?** Session/project/share/user metadata in SQLite
+   (WAL). Transcripts may remain ephemeral.
+8. **TUI fidelity.** Closely match the grok screenshot (Grok Night):
+   charcoal/black, monospace, `>` user lines, right-side timestamps,
+   dim action lines, teal identifiers, model + variant in the status
+   bar, path + context meter in the header.
 
-3. **Multi-user vs Scott-only.** Is this a single-user tool (Scott) with a shared secret, or will more people log in? If more people, do they share grok sessions or is each identity isolated?
+Slash commands: /compact and /rewind stay in the composer.
+/resume and /fork are UI actions on the session row.
 
-4. **Where do projects come from.** Scan cwds from the grok session store, explicit register (paste a path), or both? Can a project exist with zero sessions?
+Status bar: model id **plus** variant (Grok 4.6 (high) · always-approve).
 
-5. **Google SSO.** Client id, authorized origins, callback URL, and which Google accounts (or Workspace domain) are allowed? Keep password auth after SSO lands?
+Demo users: scott / buildinator and guest / guest.
 
-6. **Hosting target.** VPS, Fly, Vercel, or local on the grok box? This changes cookie secure flags, whether we can reach stdio, and whether the mock-to-remote swap is same-machine.
+## Still open (v1.1+)
 
-7. **Should mock data persist across restarts?** v0 is process memory. Want a JSON file on disk, sqlite, or is restart-wipe fine until v1 talks to real grok state?
-
-8. **How close should the TUI skin match grok-build?** Colors, keybinds, dashboard chrome, box-drawing, status line — pixel homage, or "terminal-ish is enough"? Any screenshots / theme files to copy (not source)?
-
-Also useful if you have a minute:
-
-- Preferred model id to show in the status bar (seeded as grok-4).
-- Should /resume /fork /rewind /compact be hidden until they work, or stay as visible stubs?
-- Is there already a grok ACP port or auth story on the remote host?
+- How to spawn/auth the grok ACP sidecar on the VM (binary, flags,
+  credentials). No ACP port exists on the box yet.
+- Persist transcripts (sqlite/jsonl) vs keep them ephemeral until real
+  ACP session/update is the source of truth.
+- TLS certs for 443 (Caddy vs nginx vs Tailscale).
+- Live streaming transport (SSE vs WebSocket) — planned as v3.

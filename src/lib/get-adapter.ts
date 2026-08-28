@@ -5,7 +5,8 @@ import { RemoteGrokAdapter } from "./remote-adapter";
 export function getAdapter(): GrokBuildAdapter {
   const mode = process.env.GROK_ADAPTER ?? "mock";
   if (mode === "remote") {
-    return new RemoteGrokAdapter(process.env.GROK_REMOTE_URL);
+    const url = process.env.GROK_ACP_URL ?? process.env.GROK_REMOTE_URL;
+    return new RemoteGrokAdapter(url);
   }
   return getMockAdapter();
 }

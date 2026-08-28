@@ -1,74 +1,93 @@
 # Design
 
-## Why this stack
+## Locked decisions (2026-08-28)
 
-Next.js App Router + TypeScript + Tailwind is enough to ship a usable v0 tonight:
+1. One machine. HTTPS web UI is the only internet-facing port. Grok ACP
+   binds 127.0.0.1. Local IPC is ACP on loopback
+   (GROK_ACP_URL=http://127.0.0.1:<port>).
+2. New session in the UI creates a real SQLite row + sandbox cwd.
+   Rename from the UI and via /rename.
+3. Multi-tenant even with one human. Sessions isolated by user.
+   Owner can share a session as read-only or read-write. Only the owner
+   may delete the session, revoke all shares, or destroy the sandbox.
+   Read-write: prompts, rename, /compact, /rewind. Read-only: chat +
+   artifacts.
+4. Projects are sandboxes under data/sandboxes/<userId>/<projectId>/.
+   No arbitrary host path, no `..` traversal. Cross-project in-dev deps
+   are explicit links to other registered projects, mounted at
+   deps/<name>. Sharing is the grok session, not a host FS login.
+5. Deployable to one VM you can resize. Dockerfile / compose.
+   Not Vercel-first.
+6. Hold Google SSO. Username/password stays.
+7. Real session/project/share/user metadata in SQLite (WAL,
+   better-sqlite3). Transcripts may stay mock-in-memory.
+8. TUI skin matches Grok Night (screenshot): charcoal/black, monospace,
+   `>` user prefix, timestamps on the right, dim action lines, teal
+   identifiers, model + variant bottom-right, path + context meter in
+   the header, block cursor on the composer.
 
-- App Router gives file-based pages and API routes in one process.
-- Middleware runs on the edge, which is a natural cookie gate.
-- jose signs JWTs without a database.
-- Tailwind (and a small CSS variable layer) lets the TUI skin be a theme, not a fork.
+/resume and /fork are **not** in-session slashes — they live on the
+session row because they deal with things outside the current session.
 
-No extra UI kit. No database. Mock state lives in a module singleton.
+## Stack
+
+Next.js App Router + TypeScript + Tailwind + better-sqlite3.
+
+- App Router: pages and API in one process.
+- Middleware: cookie JWT gate (jose). Edge-safe; sqlite stays in Node
+  route handlers.
+- TUI is data-theme=tui (default). web is the previous amber dark UI.
 
 ## Information architecture
 
-Unauthenticated users hit /login. Authenticated users live on /app.
+Unauthenticated → /login. Authenticated → /app.
 
-Three panes, always:
+Three panes:
 
-1. Left — every session, grouped by project (working directory). Search. New session under a project.
-2. Center — transcript (user, assistant, tool-call cards) plus composer.
-3. Right — artifacts for the selected session (files, diffs, plan, tool output, terminals, session info). Collapsible.
+1. Left — owned projects (new session lives here) and **shared with me**.
+2. Center — transcript + composer (`>` in TUI). Read-only replaces the
+   composer.
+3. Right — artifacts. Collapsible (`[` / `]`).
 
-Same routes and React state in both themes. The TUI mode sets data-theme="tui" on html and restyles.
+## Data model (SQLite)
 
-## Data model
+data/buildinator.sqlite (gitignored). WAL + busy_timeout=5000.
 
-Project: id (encoded cwd), cwd, name.
-Session: UUIDv7-ish id, projectId, title, status (idle/running/error), timestamps, model, token usage.
-Message: id, role, content, createdAt.
-ToolCall: name, status, input, output.
-Artifact: kind + title + content.
+- users — id, username, scrypt password hash
+- projects — id, owner_id, name (sandbox path derived, never stored
+  as an arbitrary host path)
+- project_links — host project → other registered project as deps/<name>
+- sessions — id, project_id, owner_id, title, status, model, variant,
+  approval, timestamps, token counters
+- session_shares — session_id, user_id, role read | write
 
-Grouping by project equals grouping by cwd, matching how grok stores sessions under encoded-cwd / session-id.
+Transcripts/tool calls/artifacts stay in the mock adapter memory Map.
+Seeded session ids get their demo transcripts on process start.
 
-## Adapter interface
+## ACL
 
-GrokBuildAdapter:
+requireRole(have, read|write|owner). Missing access is 404;
+insufficient role is 403. Owner satisfies write and read.
 
-- listProjects
-- listSessions
-- getSession
-- createSession
-- sendPrompt
-- listArtifacts
-- renameSession (needed for /rename)
+## Adapter
 
-MockGrokBuildAdapter: in-memory Maps, seeded on first import, surviving HMR via globalThis. Mutations last until the Node process restarts.
+GrokBuildAdapter is user-scoped. Mock implementation persists index
+mutations to sqlite and keeps transcripts in memory.
 
-RemoteGrokAdapter: throws with a pointer at ACP session/new, session/load, session/prompt, session/update and GROK_REMOTE_URL. v1 fills this in.
-
-API routes are a thin translation of the adapter. Swap the adapter, keep the UI.
+RemoteGrokAdapter throws with a pointer at loopback ACP. Never expose
+that port.
 
 ## Auth
 
-Cookie JWT (HS256, jose). httpOnly, SameSite=lax, 7-day expiry. Seeded user from AUTH_USERNAME / AUTH_PASSWORD / AUTH_SECRET.
+Cookie JWT (HS256, jose). sub = user id, username claim. httpOnly,
+SameSite=lax, 7-day expiry. Seeded users hashed with scrypt.
 
-Middleware protects /app and /api except login/logout. getSessionUser() is the server-side check.
+## TUI
 
-Google SSO later is another identity provider that mints the same cookie. Do not implement Google in v0.
-
-## TUI skin
-
-Not a second app. ThemeProvider writes data-theme to html and localStorage.
-
-Default: modern dark, system sans, amber accent.
-
-TUI: monospace, green-on-black, light CRT scanlines, square corners, keyboard-first (j/k, n, [/], t, slash focuses composer). Readable, not a novelty filter.
-
-Keybinds are ignored while typing in an input or textarea.
+Not a second app. ThemeProvider writes data-theme + localStorage.
+Default is TUI (Grok Night). Keyboard: j/k sessions, n new, [ ]
+artifacts, t theme, / composer. Ignored while typing.
 
 ## What we did not copy
 
-xai-org/grok-build source stays out of this repo. Session layout, ACP method names, and slash commands are described, not vendored.
+xai-org/grok-build source stays out of this repo.
