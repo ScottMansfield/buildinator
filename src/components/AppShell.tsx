@@ -25,8 +25,9 @@ const HELP = [
   "/rename <title> — rename the current session (write)",
   "/rewind — rewind last turn (write)",
   "/compact — compact grok context (write)",
+  "Esc — cancel the in-flight turn (write); queued follow-ups still send",
   "resume / fork live on the session row, not as slashes",
-  "keys: j/k sessions · n new · [ ] artifacts · t theme · / composer",
+  "keys: j/k sessions · n new · [ ] artifacts · t theme · / composer · Esc cancel",
 ].join("\n");
 
 
@@ -329,6 +330,21 @@ export function AppShell({ user }: Props) {
   }
   sendPromptRef.current = sendPrompt;
 
+  async function cancelTurn() {
+    const sid = selectedRef.current;
+    if (!sid) return;
+    if (!can(role, "write")) return;
+    try {
+      await api(`/api/sessions/${sid}/actions`, {
+        method: "POST",
+        body: JSON.stringify({ type: "cancel" }),
+      });
+      setNotice("Cancelled turn");
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "cancel failed");
+    }
+  }
+
   async function runAction(id: string, type: "fork" | "resume" | "compact" | "rewind") {
     const data = await api<{ session: SessionDetail }>(`/api/sessions/${id}/actions`, {
       method: "POST",
@@ -456,6 +472,14 @@ export function AppShell({ user }: Props) {
         document.getElementById("composer")?.focus();
         return;
       }
+      if (e.key === "Escape") {
+        if (typing) return;
+        if ((detail?.status === "running" || sending) && can(detail?.myRole, "write")) {
+          e.preventDefault();
+          void cancelTurn();
+        }
+        return;
+      }
       if (typing) return;
       if (e.key === "j" || e.key === "k") {
         e.preventDefault();
@@ -490,6 +514,7 @@ export function AppShell({ user }: Props) {
     selectedId,
     detail,
     owned,
+    sending,
     loadSession,
     toggleTheme,
   ]);
@@ -540,6 +565,7 @@ export function AppShell({ user }: Props) {
             draft={draft}
             onDraft={setDraft}
             onSend={(t) => void onCommand(t)}
+            onCancel={() => void cancelTurn()}
             sending={sending}
             notice={notice}
             role={role}
@@ -553,7 +579,7 @@ export function AppShell({ user }: Props) {
         </div>
       )}
       <footer className="status-bar">
-        <span>j/k n [ ] t · /help</span>
+        <span>j/k n [ ] t · Esc cancel · /help</span>
         <span className="status-model">
           {detail
             ? modelStatusLine(detail.model, detail.variant, detail.approval)
