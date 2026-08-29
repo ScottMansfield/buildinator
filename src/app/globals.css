@@ -452,6 +452,10 @@ select.input {
   font-size: 13px;
   padding-top: 6px;
   padding-bottom: 6px;
+  white-space: normal;
+  overflow: visible;
+  max-height: none;
+  text-overflow: unset;
 }
 
 .msg.thought .msg-role {
@@ -462,6 +466,13 @@ select.input {
 .msg.thought .md-body {
   color: var(--muted);
   font-size: 13px;
+  white-space: pre-wrap;
+  overflow: visible;
+  max-height: none;
+  text-overflow: unset;
+  display: block;
+  -webkit-line-clamp: unset;
+  line-clamp: unset;
 }
 
 html[data-theme="tui"] .msg.thought .msg-role {
@@ -798,6 +809,52 @@ html[data-theme="web"] .composer-gt {
   border-bottom: 1px solid var(--border);
 }
 
+.users-modal {
+  width: min(640px, calc(100% - 32px));
+}
+
+.users-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 12px;
+}
+
+.users-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.users-list li > span {
+  flex: 1 1 90px;
+  min-width: 80px;
+}
+
+.users-list li select {
+  width: auto;
+  min-width: 88px;
+}
+
+.users-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto auto;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.users-pw {
+  display: flex;
+  gap: 6px;
+  flex: 1 1 180px;
+}
+
+html[data-theme="tui"] .users-modal {
+  border-radius: 0;
+}
+
 .muted {
   color: var(--muted);
 }
@@ -942,4 +999,94 @@ html[data-theme="tui"] .md-body pre code {
   overflow-x: auto;
   overflow-y: hidden;
   margin: 8px 0;
+}
+
+
+.activity-chip {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--muted);
+}
+
+.activity-chip.thinking,
+.activity-chip.working,
+.activity-chip.writing {
+  color: var(--accent-2);
+}
+
+.activity-chip.idle {
+  color: var(--muted);
+}
+
+.activity-chip.error {
+  color: var(--danger);
+}
+
+.activity-updated {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: none;
+}
+
+.thought-block {
+  color: var(--muted);
+  padding: 2px 0;
+}
+
+.thought-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 16px;
+  cursor: pointer;
+  list-style: none;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 13px;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.thought-summary::-webkit-details-marker,
+.thought-block > summary::marker {
+  display: none;
+  content: "";
+}
+
+.thought-body {
+  padding: 2px 16px 8px 36px;
+  color: var(--muted);
+  white-space: pre-wrap;
+  overflow: visible;
+  max-height: none;
+  text-overflow: unset;
+  word-break: break-word;
+}
+
+.thought-body .md-body,
+.thought-body .msg-body,
+.thought-body p,
+.thought-body .md-body p {
+  color: var(--muted);
+  font-size: 13px;
+  white-space: pre-wrap;
+  overflow: visible !important;
+  max-height: none !important;
+  text-overflow: unset;
+  display: block;
+  -webkit-line-clamp: unset;
+  line-clamp: unset;
+  word-break: break-word;
+}
+
+.worked-line {
+  padding: 2px 16px 8px 36px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
 }
