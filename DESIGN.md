@@ -12,7 +12,8 @@
    may delete the session, revoke all shares, or destroy the sandbox.
    Read-write: prompts, rename, /compact, /rewind. Read-only: chat +
    artifacts.
-4. Projects are sandboxes under data/sandboxes/<userId>/<projectId>/.
+4. Projects are sandboxes under projectsRoot()/<userId>/<projectId>/
+   (local-dev: data/sandboxes/...; BUILDINATOR_ROOT: $ROOT/projects/...).
    No arbitrary host path, no `..` traversal. Cross-project in-dev deps
    are explicit links to other registered projects, mounted at
    deps/<name>. Sharing is the grok session, not a host FS login.
@@ -51,7 +52,7 @@ Three panes:
 
 ## Data model (SQLite)
 
-data/buildinator.sqlite (gitignored). WAL + busy_timeout=5000.
+dataRoot()/buildinator.sqlite (gitignored). WAL + busy_timeout=5000.
 
 - users — id, username, scrypt password hash, role (admin|write|read),
   disabled
