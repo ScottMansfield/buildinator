@@ -23,9 +23,19 @@ import { AclError, NotFoundError } from "./errors";
 import { newId } from "./ids";
 import { grokAcpEnabled, grokCliEnabled, runGrokPrompt } from "./grok-cli";
 import { isUntitled, titleFromPrompt } from "./format";
-import { getAcpClient, type AcpUpdate } from "./acp-client";
+import {
+  getAcpClient,
+  isSessionNotFoundError,
+  type AcpUpdate,
+} from "./acp-client";
 import { emit } from "./session-events";
-import { destroySandbox, displayCwd, ensureSandbox } from "./sandbox";
+import {
+  destroySandbox,
+  displayCwd,
+  ensureSandbox,
+  relativeSandboxPath,
+  sandboxPath,
+} from "./sandbox";
 import {
   cloneTranscript,
   emptyTranscript,
@@ -247,6 +257,145 @@ function persistAcpSessionId(sessionId: string, t: Transcript, acpId: string | n
   updateSessionMeta(sessionId, { acpSessionId: acpId });
 }
 
+const SEED_MAX_TURNS = 20;
+const SEED_MAX_CHARS = 20_000;
+const SEED_MSG_CHARS = 2_000;
+
+/** Compact user/assistant transcript for rehydrating a replacement ACP session. */
+function compactTranscriptSeed(t: Transcript, currentPrompt: string): string {
+  const msgs = t.messages.filter((m) => m.role === "user" || m.role === "assistant");
+  if (
+    msgs.length &&
+    msgs[msgs.length - 1].role === "user" &&
+    msgs[msgs.length - 1].content === currentPrompt
+  ) {
+    msgs.pop();
+  }
+  const recent = msgs.slice(-SEED_MAX_TURNS);
+  const blocks: string[] = [];
+  for (const m of recent) {
+    let text = m.content.trim();
+    if (text.length > SEED_MSG_CHARS) text = text.slice(0, SEED_MSG_CHARS) + "…";
+    blocks.push(`${m.role === "user" ? "USER" : "ASSISTANT"}: ${text}`);
+  }
+  let body = blocks.join("\n\n");
+  if (body.length > SEED_MAX_CHARS) {
+    body = body.slice(body.length - SEED_MAX_CHARS);
+    const nl = body.indexOf("\n");
+    if (nl >= 0) body = body.slice(nl + 1);
+  }
+  const preface =
+    "The previous grok ACP session was lost. Here is a compact transcript of recent " +
+    "user/assistant messages so you have context. Ignore thoughts and tool payloads. " +
+    "Do not treat this block as a new request except for the last user message after the transcript.";
+  if (!body.trim()) {
+    return `${preface}\n\nThe user's current request:\n${currentPrompt}`;
+  }
+  return (
+    `${preface}\n\n=== conversation so far ===\n${body}\n=== end transcript ===\n\n` +
+    `The user's current request:\n${currentPrompt}`
+  );
+}
+
+function errText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err ?? "unknown error");
+}
+
+function sandboxAbsForSession(sessionId: string): string | null {
+  const row = getSessionRow(sessionId);
+  if (!row) return null;
+  const project = getProjectRow(row.project_id);
+  if (!project) return null;
+  try {
+    return sandboxPath(project.owner_id, project.id);
+  } catch {
+    return null;
+  }
+}
+
+function isWriteLikeTool(name: string): boolean {
+  const n = name.trim().toLowerCase();
+  const compact = n.replace(/\s+/g, "_");
+  if (compact === "write_file" || compact === "edit_file") return true;
+  if (n === "write" || n === "edit") return true;
+  if (/^wrote\b/.test(n) || /^edited\b/.test(n)) return true;
+  return false;
+}
+
+function writePathFromTool(name: string, input: Record<string, string>): string | undefined {
+  const fromInput = input.path?.trim();
+  if (fromInput) return fromInput;
+  const m = name.trim().match(/^(?:Wrote|Edited)\s+(\S+)/i);
+  return m?.[1];
+}
+
+function upsertFileArtifact(
+  sessionId: string,
+  t: Transcript,
+  relPath: string,
+  bytes: number | undefined,
+  persist: () => void,
+): void {
+  const now = new Date().toISOString();
+  const content = bytes != null ? `${bytes} bytes` : "";
+  const existing = t.artifacts.find((a) => a.kind === "file" && a.title === relPath);
+  if (existing) {
+    existing.createdAt = now;
+    if (content) existing.content = content;
+    emit(sessionId, { type: "artifact", artifact: { ...existing } });
+  } else {
+    const artifact = {
+      id: newId(),
+      sessionId,
+      kind: "file" as const,
+      title: relPath,
+      createdAt: now,
+      content,
+    };
+    t.artifacts.push(artifact);
+    emit(sessionId, { type: "artifact", artifact: { ...artifact } });
+  }
+  persist();
+}
+
+function recordSandboxWrite(
+  sessionId: string,
+  t: Transcript,
+  candidate: string,
+  bytes: number | undefined,
+  persist: () => void,
+): void {
+  const sandbox = sandboxAbsForSession(sessionId);
+  if (!sandbox) return;
+  const rel = relativeSandboxPath(sandbox, candidate);
+  if (!rel) return;
+  upsertFileArtifact(sessionId, t, rel, bytes, persist);
+}
+
+function backfillFileArtifacts(sessionId: string, t: Transcript): boolean {
+  const sandbox = sandboxAbsForSession(sessionId);
+  if (!sandbox) return false;
+  let changed = false;
+  for (const tool of t.toolCalls) {
+    if (!isWriteLikeTool(tool.name)) continue;
+    const raw = writePathFromTool(tool.name, tool.input);
+    if (!raw) continue;
+    const rel = relativeSandboxPath(sandbox, raw);
+    if (!rel) continue;
+    if (t.artifacts.some((a) => a.kind === "file" && a.title === rel)) continue;
+    t.artifacts.push({
+      id: newId(),
+      sessionId,
+      kind: "file",
+      title: rel,
+      createdAt: tool.createdAt,
+      content: "",
+    });
+    changed = true;
+  }
+  return changed;
+}
+
 export class MockGrokBuildAdapter implements GrokBuildAdapter {
   private store: Store;
   private replyAt = 0;
@@ -361,6 +510,10 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
       emit(sessionId, { type: "activity", phase: "working" });
       emit(sessionId, { type: "tool", tool: { ...tool, input: { ...tool.input } } });
       persist();
+      if (isWriteLikeTool(tool.name)) {
+        const raw = writePathFromTool(tool.name, tool.input);
+        if (raw) recordSandboxWrite(sessionId, t, raw, undefined, persist);
+      }
       return;
     }
 
@@ -493,43 +646,86 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
         return;
       }
       const previousId = resolveAcpSessionId(sessionId, t);
-      let loaded = false;
-      if (previousId) {
+      let acpId = previousId;
+      let mintedNew = false;
+      if (previousId && client.hasLoaded(previousId)) {
+        persistAcpSessionId(sessionId, t, previousId);
+      } else if (previousId) {
+        let loadErr: unknown;
         try {
           await client.sessionLoad(previousId);
-          loaded = true;
-        } catch {
-          loaded = false;
+        } catch (err) {
+          loadErr = err;
+          console.error("[acp] session/load failed", previousId, err);
+          t.messages.push({
+            id: newId(),
+            role: "action",
+            content: `ACP session/load failed: ${errText(err)}`,
+            createdAt: new Date().toISOString(),
+          });
+          persist();
+          try {
+            await client.ensureProcess();
+            await client.sessionLoad(previousId);
+            loadErr = undefined;
+          } catch (err2) {
+            loadErr = err2;
+            console.error("[acp] session/load retry failed", previousId, err2);
+          }
         }
+        if (loadErr) {
+          if (isSessionNotFoundError(loadErr)) {
+            const created = await client.sessionNew(cwd);
+            persistAcpSessionId(sessionId, t, created);
+            mintedNew = true;
+            acpId = created;
+            t.messages.push({
+              id: newId(),
+              role: "action",
+              content: `ACP session reset (new ${created.slice(0, 8)})`,
+              createdAt: new Date().toISOString(),
+            });
+            saveTranscript(sessionId, t);
+          } else {
+            throw loadErr instanceof Error ? loadErr : new Error(errText(loadErr));
+          }
+        } else {
+          persistAcpSessionId(sessionId, t, previousId);
+        }
+      } else {
+        const created = await client.sessionNew(cwd);
+        persistAcpSessionId(sessionId, t, created);
+        mintedNew = true;
+        acpId = created;
+        saveTranscript(sessionId, t);
       }
       if (cancelled()) {
         persist();
         return;
       }
-      if (!loaded) {
-        const created = await client.sessionNew(cwd);
-        persistAcpSessionId(sessionId, t, created);
-        if (previousId) {
-          t.messages.push({
-            id: newId(),
-            role: "action",
-            content: `ACP session reset (new ${created.slice(0, 8)})`,
-            createdAt: new Date().toISOString(),
-          });
-        }
-        saveTranscript(sessionId, t);
-      }
+      if (!acpId) throw new Error("ACP session id missing");
       if (cancelled()) {
-        if (t.acpSessionId) client.sessionCancel(t.acpSessionId);
+        client.sessionCancel(acpId);
         persist();
         return;
       }
 
+      const promptText =
+        mintedNew && previousId ? compactTranscriptSeed(t, prompt) : prompt;
+
       const assistantIds = new Map<string, string>();
       const thoughtIds = new Map<string, string>();
-      const result = await client.sessionPrompt(t.acpSessionId!, prompt, (update) => {
-        this.applyAcpUpdate(user, sessionId, t, update, assistantIds, thoughtIds, persist);
+      const unregWrite = client.onFsWrite((absPath, bytes) => {
+        recordSandboxWrite(sessionId, t, absPath, bytes, persist);
       });
+      let result: { stopReason?: string };
+      try {
+        result = await client.sessionPrompt(acpId, promptText, (update) => {
+          this.applyAcpUpdate(user, sessionId, t, update, assistantIds, thoughtIds, persist);
+        });
+      } finally {
+        unregWrite();
+      }
 
       persist();
       saveTranscript(sessionId, t);
@@ -615,7 +811,16 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
 
 
   async listSessions(user: SessionUser, projectId?: string): Promise<SessionSummary[]> {
-    return listSessionSummaries(user.id, projectId);
+    const list = listSessionSummaries(user.id, projectId);
+    let changed = false;
+    for (const s of list) {
+      if (!isUntitled(s.title)) continue;
+      const t = this.store.transcripts.get(s.id) ?? loadTranscript(s.id);
+      const first = t?.messages.find((m) => m.role === "user");
+      if (!first) continue;
+      if (maybeAutotitle(s.id, s.title, first.content)) changed = true;
+    }
+    return changed ? listSessionSummaries(user.id, projectId) : list;
   }
 
   async getSession(user: SessionUser, id: string): Promise<SessionDetail | null> {
@@ -627,6 +832,7 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
       const first = t.messages.find((m) => m.role === "user");
       if (first) maybeAutotitle(id, summary.title, first.content);
     }
+    if (backfillFileArtifacts(id, t)) saveTranscript(id, t);
     const latest = getAccessibleSummary(user.id, id) ?? summary;
     const detail = withTranscript(latest, t);
     if (summary.myRole === "owner") {
@@ -874,10 +1080,13 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
       try {
         const client = getAcpClient();
         await client.ensureProcess();
-        await client.sessionLoad(acpId);
+        if (!client.hasLoaded(acpId)) {
+          await client.sessionLoad(acpId);
+        }
         action = "Resumed ACP session";
-      } catch {
-        action = "ACP session/load failed; next prompt will session/new";
+      } catch (err) {
+        console.error("[acp] resume session/load failed", acpId, err);
+        action = `ACP session/load failed: ${errText(err)}`;
       }
     }
     t.messages.push({
