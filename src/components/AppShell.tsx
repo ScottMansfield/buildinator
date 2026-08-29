@@ -13,6 +13,12 @@ import type {
   SessionUser,
   ShareRole,
 } from "@/lib/types";
+import {
+  IDLE_ACTIVITY,
+  bumpActivity,
+  type SessionActivity,
+} from "@/lib/activity";
+import { mergeStreamDetail, stampLastThoughtEnd } from "@/lib/stream-merge";
 import { Sidebar } from "./Sidebar";
 import { ChatPane } from "./ChatPane";
 import { ArtifactsPane } from "./ArtifactsPane";
@@ -72,6 +78,7 @@ export function AppShell({ user }: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const [sending, setSending] = useState(false);
   const sendingRef = useRef(false);
+  const [activity, setActivity] = useState<SessionActivity>(IDLE_ACTIVITY);
   const queueRef = useRef<string[]>([]);
   const selectedRef = useRef<string | null>(null);
   const sendPromptRef = useRef<(text: string, fromQueue?: boolean) => Promise<void>>(async () => {});
@@ -111,9 +118,15 @@ export function AppShell({ user }: Props) {
   useEffect(() => {
     if (!selectedId) return;
     const sid = selectedId;
-    const es = new EventSource(`/api/sessions/${sid}/events`);
-    es.onmessage = (ev) => {
-      if (!ev.data) return;
+    let closed = false;
+    let es: EventSource | null = null;
+    let retry = 0;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    const applyActivity = (phase: SessionActivity["phase"]) => {
+      setActivity((prev) => bumpActivity(prev, phase));
+    };
+    const handleEvent = (ev: MessageEvent) => {
+      if (!ev.data || ev.data === ": connected") return;
       let event: SessionStreamEvent;
       try {
         event = JSON.parse(ev.data) as SessionStreamEvent;
@@ -122,21 +135,37 @@ export function AppShell({ user }: Props) {
       }
       if (selectedRef.current !== sid) return;
       if (event.type === "message") {
-        setDetail((prev) => upsertStreamMessage(prev, sid, event));
+        applyActivity("writing");
+        setDetail((prev) => {
+          const stamped = stampLastThoughtEnd(prev, sid);
+          return upsertStreamMessage(stamped, sid, event);
+        });
       } else if (event.type === "thought") {
+        applyActivity("thinking");
         setDetail((prev) =>
           upsertStreamMessage(prev, sid, { id: event.id, role: "thought", content: event.content }),
         );
       } else if (event.type === "tool") {
+        applyActivity("working");
         setDetail((prev) => {
-          if (!prev || prev.id !== sid) return prev;
-          const idx = prev.toolCalls.findIndex((t) => t.id === event.tool.id);
-          const toolCalls = prev.toolCalls.slice();
+          const base = stampLastThoughtEnd(prev, sid);
+          if (!base || base.id !== sid) return base;
+          const idx = base.toolCalls.findIndex((t) => t.id === event.tool.id);
+          const toolCalls = base.toolCalls.slice();
           if (idx >= 0) toolCalls[idx] = event.tool;
           else toolCalls.push(event.tool);
-          return { ...prev, toolCalls };
+          return { ...base, toolCalls };
         });
+      } else if (event.type === "activity") {
+        applyActivity(event.phase);
       } else if (event.type === "status") {
+        if (event.status === "running") {
+          setActivity((prev) =>
+            prev.phase === "idle" ? bumpActivity(prev, "thinking") : { ...prev, lastEventAt: Date.now() },
+          );
+        } else {
+          applyActivity("idle");
+        }
         setDetail((prev) => (prev && prev.id === sid ? { ...prev, status: event.status } : prev));
       } else if (event.type === "title") {
         setDetail((prev) => (prev && prev.id === sid ? { ...prev, title: event.title } : prev));
@@ -144,6 +173,7 @@ export function AppShell({ user }: Props) {
           list.map((s) => (s.id === sid ? { ...s, title: event.title } : s)),
         );
       } else if (event.type === "done") {
+        applyActivity("idle");
         void (async () => {
           try {
             await loadSession(sid);
@@ -154,6 +184,7 @@ export function AppShell({ user }: Props) {
           if (sendingRef.current) onTurnEndedRef.current(sid, true);
         })();
       } else if (event.type === "error") {
+        applyActivity("idle");
         setNotice(event.message);
         setDetail((prev) => (prev && prev.id === sid ? { ...prev, status: "error" } : prev));
         void (async () => {
@@ -167,8 +198,38 @@ export function AppShell({ user }: Props) {
         })();
       }
     };
+    const refetch = async () => {
+      try {
+        const data = await api<{ session: SessionDetail }>(`/api/sessions/${sid}`);
+        if (selectedRef.current !== sid) return;
+        setDetail((prev) => mergeStreamDetail(prev, data.session));
+      } catch {
+        // live stream still authoritative
+      }
+    };
+    const connect = () => {
+      if (closed) return;
+      es = new EventSource(`/api/sessions/${sid}/events`);
+      es.addEventListener("message", handleEvent);
+      es.onopen = () => {
+        retry = 0;
+        void refetch();
+      };
+      es.onerror = () => {
+        es?.close();
+        es = null;
+        if (closed) return;
+        const delay = Math.min(8000, 500 * 2 ** retry);
+        retry += 1;
+        retryTimer = setTimeout(connect, delay);
+      };
+    };
+    setActivity(IDLE_ACTIVITY);
+    connect();
     return () => {
-      es.close();
+      closed = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      es?.close();
     };
   }, [selectedId, loadSession, refreshLists]);
 
@@ -265,7 +326,10 @@ export function AppShell({ user }: Props) {
     setSending(false);
     const next = queueRef.current.shift();
     if (next) void sendPromptRef.current(next, true);
-    else setNotice(null);
+    else {
+      setActivity(IDLE_ACTIVITY);
+      setNotice(null);
+    }
   }
   onTurnEndedRef.current = (sid: string, reappend = false) => drainQueue(sid, reappend);
 
@@ -280,6 +344,7 @@ export function AppShell({ user }: Props) {
     }
     sendingRef.current = true;
     setSending(true);
+    setActivity((prev) => bumpActivity(prev, "thinking"));
     if (!fromQueue) appendLocal(sid, text, "grok is running…");
     else {
       setDetail((prev) => {
@@ -327,7 +392,10 @@ export function AppShell({ user }: Props) {
         setSending(false);
         const next = queueRef.current.shift();
         if (next) void sendPrompt(next, true);
-        else setNotice(null);
+        else {
+          setActivity(IDLE_ACTIVITY);
+          setNotice(null);
+        }
       }
     }
   }
@@ -585,6 +653,7 @@ export function AppShell({ user }: Props) {
             notice={notice}
             role={accountWrite ? role : "read"}
             onShare={() => setShareOpen(true)}
+            activity={activity}
           />
           <ArtifactsPane
             artifacts={detail?.artifacts ?? []}
