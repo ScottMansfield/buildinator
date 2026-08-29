@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, apiResult } from "@/lib/client";
-import { can } from "@/lib/acl";
+import { can, canAccountWrite, isAdmin } from "@/lib/acl";
 import { modelStatusLine } from "@/lib/format";
 import type {
   Project,
@@ -19,6 +19,7 @@ import { ArtifactsPane } from "./ArtifactsPane";
 import { ThemeToggle } from "./ThemeToggle";
 import { useTheme } from "./ThemeProvider";
 import { SharePanel } from "./SharePanel";
+import { UsersPanel } from "./UsersPanel";
 
 const HELP = [
   "/help — this list",
@@ -78,6 +79,8 @@ export function AppShell({ user }: Props) {
   const [notice, setNotice] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
+  const [usersOpen, setUsersOpen] = useState(false);
+  const accountWrite = canAccountWrite(user.role);
 
   const selectedProject = useMemo(
     () => projects.find((p) => p.id === detail?.projectId),
@@ -333,7 +336,7 @@ export function AppShell({ user }: Props) {
   async function cancelTurn() {
     const sid = selectedRef.current;
     if (!sid) return;
-    if (!can(role, "write")) return;
+    if (!accountWrite || !can(role, "write")) return;
     try {
       await api(`/api/sessions/${sid}/actions`, {
         method: "POST",
@@ -421,7 +424,7 @@ export function AppShell({ user }: Props) {
         setNotice(HELP);
         break;
       case "rename":
-        if (!can(role, "write")) {
+        if (!accountWrite || !can(role, "write")) {
           setNotice("Read-only: cannot rename.");
         } else if (!arg) {
           setNotice("Usage: /rename <title>");
@@ -430,11 +433,11 @@ export function AppShell({ user }: Props) {
         }
         break;
       case "rewind":
-        if (!can(role, "write") || !selectedId) setNotice("Read-only.");
+        if (!accountWrite || !can(role, "write") || !selectedId) setNotice("Read-only.");
         else await runAction(selectedId, "rewind");
         break;
       case "compact":
-        if (!can(role, "write") || !selectedId) setNotice("Read-only.");
+        if (!accountWrite || !can(role, "write") || !selectedId) setNotice("Read-only.");
         else await runAction(selectedId, "compact");
         break;
       case "resume":
@@ -474,7 +477,7 @@ export function AppShell({ user }: Props) {
       }
       if (e.key === "Escape") {
         if (typing) return;
-        if ((detail?.status === "running" || sending) && can(detail?.myRole, "write")) {
+        if ((detail?.status === "running" || sending) && accountWrite && can(detail?.myRole, "write")) {
           e.preventDefault();
           void cancelTurn();
         }
@@ -493,6 +496,7 @@ export function AppShell({ user }: Props) {
       }
       if (e.key === "n") {
         e.preventDefault();
+        if (!accountWrite) return;
         const projectId =
           (detail?.myRole === "owner" ? detail.projectId : undefined) ??
           owned[0]?.id;
@@ -517,6 +521,7 @@ export function AppShell({ user }: Props) {
     sending,
     loadSession,
     toggleTheme,
+    accountWrite,
   ]);
 
   const shares: SessionShare[] = detail?.shares ?? [];
@@ -530,6 +535,15 @@ export function AppShell({ user }: Props) {
         </span>
         <div className="chrome-spacer" />
         <ThemeToggle />
+        {isAdmin(user.role) ? (
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => setUsersOpen(true)}
+          >
+            users
+          </button>
+        ) : null}
         <span style={{ color: "var(--muted)" }}>{user.username}</span>
         <button type="button" className="btn btn-ghost" onClick={() => void logout()}>
           log out
@@ -558,6 +572,7 @@ export function AppShell({ user }: Props) {
             onDelete={(id) => void deleteSession(id)}
             search={search}
             onSearch={setSearch}
+            canWrite={accountWrite}
           />
           <ChatPane
             session={detail}
@@ -568,7 +583,7 @@ export function AppShell({ user }: Props) {
             onCancel={() => void cancelTurn()}
             sending={sending}
             notice={notice}
-            role={role}
+            role={accountWrite ? role : "read"}
             onShare={() => setShareOpen(true)}
           />
           <ArtifactsPane
@@ -586,8 +601,9 @@ export function AppShell({ user }: Props) {
             : "Grok 4.6 (high) · always-approve"}
         </span>
       </footer>
+      <UsersPanel open={usersOpen} onClose={() => setUsersOpen(false)} />
       <SharePanel
-        open={shareOpen && role === "owner"}
+        open={shareOpen && accountWrite && role === "owner"}
         shares={shares}
         onClose={() => setShareOpen(false)}
         onAdd={addShare}
