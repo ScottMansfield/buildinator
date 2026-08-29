@@ -31,14 +31,21 @@ Production: `npm run build` then `npm start` (Next standalone). Copy `.env.examp
 
 ACP is stdio only. Do not publish an ACP port.
 
-## Demo users
+## Roles
 
-Seeded on an empty database:
+Three account roles in the same SQLite `users` table (`users.role`). Role is a ceiling: a `read` user cannot prompt even if someone later shares a conversation as write.
 
-- `scott` / `buildinator` — owns the seed projects
-- `guest` / `guest` — used for share demos
+| Role | What they can do |
+| --- | --- |
+| `admin` | Everything a write user can, plus user CRUD (header **users** panel). Can manage users even without owning a session. |
+| `write` | Own projects/sessions, prompt, share own conversations, compact/rewind/cancel on write sessions. Today's default. |
+| `read` | Log in and see sessions shared with them. Cannot create projects or sessions. Cannot prompt, cancel, compact, rewind, or share. Composer is locked. |
 
-Anyone can create **their own** projects and sessions. They cannot create sessions inside someone else's project. Share is per conversation, not per project.
+Session shares stay per conversation (`read` vs `write`) for write/admin users. Only the owner may share or delete a session.
+
+Empty database seed: `scott` / `buildinator` as **admin**, `craig` / `buildinator` as **write**. Guest is not seeded and there is no guest login. Existing databases: `scott` is promoted to admin; the `guest` user and their shares are deleted on migrate; `craig` is inserted as write if missing. Admins create further users from the **users** panel (username, password, role; change role, reset password, disable, remove). The last admin cannot be deleted, demoted, or disabled.
+
+Write users cannot create sessions inside someone else's project. Share is per conversation, not per project.
 
 ## Sharing
 
@@ -66,13 +73,14 @@ See `Dockerfile` / `docker-compose.yml` for a containerized variant. Compose sti
 
 ## What works
 
-- Cookie JWT auth, scrypt passwords. Google SSO is on hold.
+- Cookie JWT auth, scrypt passwords. Role is loaded from SQLite on each request (not trusted from the JWT). Google SSO is on hold.
 - SQLite WAL at `data/buildinator.sqlite`.
 - Sandboxes `data/sandboxes/<userId>/<projectId>/`. Cross-project deps only via explicit links at `deps/<name>`.
 - ACP stdio + SSE streaming (thoughts, tokens, tools, plan artifact).
 - Cancel in-flight ACP turn via `session/cancel` (write/owner). Mock running turns go idle; one-shot `grok -p` cannot cancel mid-process.
 - Session autotitle, queued composer, markdown+math in the transcript.
-- Share roles owner / write / read.
+- Account roles admin / write / read. Session shares owner / write / read.
+- Admin **users** panel (list, add, role, password, disable, remove).
 
 ## Still open
 
