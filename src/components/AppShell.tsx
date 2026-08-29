@@ -23,8 +23,8 @@ import { SharePanel } from "./SharePanel";
 const HELP = [
   "/help — this list",
   "/rename <title> — rename the current session (write)",
-  "/rewind — rewind last turn (write, stub)",
-  "/compact — compact transcript (write, stub)",
+  "/rewind — rewind last turn (write)",
+  "/compact — compact grok context (write)",
   "resume / fork live on the session row, not as slashes",
   "keys: j/k sessions · n new · [ ] artifacts · t theme · / composer",
 ].join("\n");
@@ -343,8 +343,8 @@ export function AppShell({ user }: Props) {
         : type === "resume"
           ? "Resumed session."
           : type === "compact"
-            ? "Compacted (stub)."
-            : "Rewound (stub).",
+            ? "Compacted grok context."
+            : "Rewound last turn.",
     );
   }
 
