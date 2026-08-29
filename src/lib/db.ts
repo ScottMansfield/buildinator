@@ -243,6 +243,30 @@ export function getProjectRow(id: string): ProjectRow | undefined {
   return getDb().prepare("SELECT * FROM projects WHERE id = ?").get(id) as ProjectRow | undefined;
 }
 
+export function findOwnedProjectByName(ownerId: string, name: string): ProjectRow | undefined {
+  return getDb()
+    .prepare(
+      "SELECT * FROM projects WHERE owner_id = ? AND name = ? COLLATE NOCASE",
+    )
+    .get(ownerId, name) as ProjectRow | undefined;
+}
+
+export function insertProject(row: {
+  id: string;
+  ownerId: string;
+  name: string;
+  createdAt: string;
+}): ProjectRow {
+  getDb()
+    .prepare(
+      "INSERT INTO projects (id, owner_id, name, created_at) VALUES (?, ?, ?, ?)",
+    )
+    .run(row.id, row.ownerId, row.name, row.createdAt);
+  const created = getProjectRow(row.id);
+  if (!created) throw new Error("failed to load created project");
+  return created;
+}
+
 export function listProjectRowsForOwner(ownerId: string): ProjectRow[] {
   return getDb()
     .prepare("SELECT * FROM projects WHERE owner_id = ? ORDER BY name")
