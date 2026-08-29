@@ -261,7 +261,7 @@ export function seedTranscripts(): Map<string, Transcript> {
         role: "assistant",
         createdAt: hoursAgo(71.8),
         content:
-          "One VM, volume for grok state. Grok ACP binds 127.0.0.1 only. HTTPS web UI is the only port on the internet. Guest has read-write on this session for the sharing demo.",
+          "One VM, volume for grok state. Grok ACP binds 127.0.0.1 only. HTTPS web UI is the only port on the internet. Share this session as write for a second account.",
       },
     ],
     toolCalls: [],
@@ -291,7 +291,7 @@ export function seedTranscripts(): Map<string, Transcript> {
         role: "assistant",
         createdAt: hoursAgo(3),
         content:
-          "Failed to bind 127.0.0.1:8443 — certificate path not mounted. Mocking the error so the UI has a red status. Guest can view this session read-only.",
+          "Failed to bind 127.0.0.1:8443 — certificate path not mounted. Mocking the error so the UI has a red status. Share this session as read for a second account.",
       },
     ],
     toolCalls: [
