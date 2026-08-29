@@ -1,0 +1,14 @@
+# Live box: HTTPS UI only. flush_interval -1 so session SSE is not buffered.
+# Do not point this at grok agent serve — ACP stays stdio.
+
+:80 {
+	reverse_proxy 127.0.0.1:3000 {
+		flush_interval -1
+	}
+}
+
+https://{$BUILDINATOR_HOST} {
+	reverse_proxy 127.0.0.1:3000 {
+		flush_interval -1
+	}
+}

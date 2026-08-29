@@ -1,7 +1,15 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import type { AccessRole, Project, SessionDetail } from "@/lib/types";
 import { contextMeter } from "@/lib/format";
+import {
+  formatElapsed,
+  formatUpdatedAgo,
+  resolveActivity,
+  type SessionActivity,
+} from "@/lib/activity";
+import { toolsInFlight } from "@/lib/stream-merge";
 import { MessageList } from "./MessageList";
 import { Composer } from "./Composer";
 
@@ -16,6 +24,7 @@ type Props = {
   notice: string | null;
   role: AccessRole | null;
   onShare?: () => void;
+  activity: SessionActivity;
 };
 
 export function ChatPane({
@@ -29,13 +38,45 @@ export function ChatPane({
   notice,
   role,
   onShare,
+  activity,
 }: Props) {
   const readOnly = role === "read";
-  const running = Boolean(session && (session.status === "running" || sending));
+  const resolved = resolveActivity(session, sending, activity);
+  const running = resolved.phase !== "idle";
   const canCancel = Boolean(onCancel && running && role && role !== "read");
   const cwd = session?.projectCwd ?? project?.cwd ?? "";
   const usedIn = session?.tokenUsage?.input ?? 0;
   const usedOut = session?.tokenUsage?.output ?? 0;
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!running) return;
+    const t = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(t);
+  }, [running]);
+
+  const elapsed = running
+    ? formatElapsed(now - (resolved.phaseStartedAt || now))
+    : null;
+  const updated =
+    running && resolved.lastEventAt
+      ? formatUpdatedAgo(now - resolved.lastEventAt)
+      : null;
+  const chipClass =
+    session?.status === "error" && !running
+      ? "error"
+      : resolved.phase;
+  const chipLabel =
+    session?.status === "error" && !running
+      ? "error"
+      : resolved.phase === "idle"
+        ? "idle"
+        : `${resolved.phase} ${elapsed}`;
+  const liveThought =
+    resolved.phase === "thinking"
+      ? [...(session?.messages ?? [])].reverse().find((m) => m.role === "thought")?.id ??
+        null
+      : null;
 
   return (
     <section className="pane chat-pane" aria-label="Chat">
@@ -44,7 +85,10 @@ export function ChatPane({
           {session ? `main ${cwd}` : "no session"}
         </span>
         {session ? (
-          <span className={"badge " + session.status}>{session.status}</span>
+          <span className={"activity-chip " + chipClass} title={updated ?? undefined}>
+            {chipLabel}
+            {updated ? <span className="activity-updated">{updated}</span> : null}
+          </span>
         ) : null}
         {canCancel ? (
           <button type="button" className="btn btn-ghost composer-cancel" onClick={onCancel}>
@@ -69,7 +113,13 @@ export function ChatPane({
         </div>
       ) : null}
       {session ? (
-        <MessageList messages={session.messages} toolCalls={session.toolCalls} />
+        <MessageList
+          messages={session.messages}
+          toolCalls={session.toolCalls}
+          inFlight={running || sending || toolsInFlight(session.toolCalls)}
+          liveThoughtId={liveThought}
+          now={now}
+        />
       ) : (
         <div className="empty">Select a session or create one from the left.</div>
       )}
