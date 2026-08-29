@@ -3,7 +3,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { ChatMessage, ToolCall } from "@/lib/types";
 import { clockTime } from "@/lib/format";
-import { formatElapsed } from "@/lib/activity";
+import { formatElapsed, type PhaseCrumb, type SessionActivity } from "@/lib/activity";
 import { MarkdownBody } from "./MarkdownBody";
 
 function RichText({ text }: { text: string }) {
@@ -106,31 +106,66 @@ type Item =
   | { kind: "msg"; at: string; msg: ChatMessage }
   | { kind: "tool"; at: string; tool: ToolCall };
 
+function toolRunKey(tool: ToolCall): string {
+  return tool.name.trim().toLowerCase();
+}
+
+/** Consecutive same name/title collapse to one row; latest status wins. No counts. */
+function collapseConsecutiveTools(items: Item[]): Item[] {
+  const out: Item[] = [];
+  for (const item of items) {
+    const prev = out[out.length - 1];
+    if (
+      item.kind === "tool" &&
+      prev?.kind === "tool" &&
+      toolRunKey(prev.tool) === toolRunKey(item.tool)
+    ) {
+      out[out.length - 1] = {
+        kind: "tool",
+        at: item.at,
+        tool: {
+          ...item.tool,
+          output: item.tool.output ?? prev.tool.output,
+        },
+      };
+    } else {
+      out.push(item);
+    }
+  }
+  return out;
+}
+
 export function MessageList({
   messages,
   toolCalls,
   inFlight = false,
   liveThoughtId = null,
   now = Date.now(),
+  crumbs = [],
+  activity: _activity,
 }: {
   messages: ChatMessage[];
   toolCalls: ToolCall[];
   inFlight?: boolean;
   liveThoughtId?: string | null;
   now?: number;
+  crumbs?: PhaseCrumb[];
+  activity?: SessionActivity;
 }) {
   const toolsByTime = [...toolCalls].sort((a, b) =>
     a.createdAt.localeCompare(b.createdAt),
   );
 
-  const items: Item[] = [
-    ...messages.map((msg) => ({ kind: "msg" as const, at: msg.createdAt, msg })),
-    ...toolsByTime.map((tool) => ({
-      kind: "tool" as const,
-      at: tool.createdAt,
-      tool,
-    })),
-  ].sort((a, b) => a.at.localeCompare(b.at));
+  const items: Item[] = collapseConsecutiveTools(
+    [
+      ...messages.map((msg) => ({ kind: "msg" as const, at: msg.createdAt, msg })),
+      ...toolsByTime.map((tool) => ({
+        kind: "tool" as const,
+        at: tool.createdAt,
+        tool,
+      })),
+    ].sort((a, b) => a.at.localeCompare(b.at)),
+  );
 
   if (items.length === 0) {
     return (
@@ -262,6 +297,14 @@ export function MessageList({
           </div>
         );
       })}
+      {crumbs.map((c) => (
+        <div key={c.id} className="phase-crumb">
+          <span className="action-diamond" aria-hidden>
+            ◆
+          </span>
+          {c.phase} {formatElapsed(c.ms)}
+        </div>
+      ))}
     </div>
   );
 }
