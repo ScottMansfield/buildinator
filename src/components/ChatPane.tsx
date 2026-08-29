@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AccessRole, Project, SessionDetail } from "@/lib/types";
 import { contextMeter } from "@/lib/format";
 import {
   formatElapsed,
   formatUpdatedAgo,
   resolveActivity,
+  type ActivityPhase,
+  type PhaseCrumb,
   type SessionActivity,
 } from "@/lib/activity";
 import { toolsInFlight } from "@/lib/stream-merge";
@@ -26,6 +28,14 @@ type Props = {
   onShare?: () => void;
   activity: SessionActivity;
 };
+
+function lastUserMessageId(session: SessionDetail | null): string | null {
+  if (!session) return null;
+  for (let i = session.messages.length - 1; i >= 0; i--) {
+    if (session.messages[i].role === "user") return session.messages[i].id;
+  }
+  return null;
+}
 
 export function ChatPane({
   session,
@@ -48,10 +58,41 @@ export function ChatPane({
   const usedIn = session?.tokenUsage?.input ?? 0;
   const usedOut = session?.tokenUsage?.output ?? 0;
   const [now, setNow] = useState(() => Date.now());
+  const [crumbs, setCrumbs] = useState<PhaseCrumb[]>([]);
+  const prevPhaseRef = useRef(resolved.phase);
+  const prevStartRef = useRef(resolved.phaseStartedAt);
+  const crumbKeyRef = useRef("");
+  const lastUserId = lastUserMessageId(session);
+
+  useEffect(() => {
+    setCrumbs([]);
+    crumbKeyRef.current = "";
+    prevPhaseRef.current = resolved.phase;
+    prevStartRef.current = resolved.phaseStartedAt;
+    // Reset history on session or new user turn — not on every phase tick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- lastUserId/session id only
+  }, [session?.id, lastUserId]);
+
+  useEffect(() => {
+    const prev = prevPhaseRef.current;
+    const prevStart = prevStartRef.current;
+    if (prev !== "idle" && prev !== resolved.phase) {
+      const key = `${prev}:${prevStart}`;
+      if (crumbKeyRef.current !== key) {
+        crumbKeyRef.current = key;
+        const ms = Math.max(0, Date.now() - (prevStart || Date.now()));
+        if (ms >= 150) {
+          setCrumbs((c) => [...c, { id: key, phase: prev as ActivityPhase, ms }]);
+        }
+      }
+    }
+    prevPhaseRef.current = resolved.phase;
+    prevStartRef.current = resolved.phaseStartedAt;
+  }, [resolved.phase, resolved.phaseStartedAt]);
 
   useEffect(() => {
     if (!running) return;
-    const t = setInterval(() => setNow(Date.now()), 250);
+    const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, [running]);
 
@@ -113,13 +154,24 @@ export function ChatPane({
         </div>
       ) : null}
       {session ? (
-        <MessageList
-          messages={session.messages}
-          toolCalls={session.toolCalls}
-          inFlight={running || sending || toolsInFlight(session.toolCalls)}
-          liveThoughtId={liveThought}
-          now={now}
-        />
+        <>
+          <MessageList
+            messages={session.messages}
+            toolCalls={session.toolCalls}
+            inFlight={running || sending || toolsInFlight(session.toolCalls)}
+            liveThoughtId={liveThought}
+            now={now}
+            crumbs={crumbs}
+            activity={activity}
+          />
+          <div className={"live-status " + chipClass} role="status" aria-live="polite">
+            <span className="action-diamond" aria-hidden>
+              ◆
+            </span>
+            <span className="live-status-label">{chipLabel}</span>
+            {updated ? <span className="activity-updated">{updated}</span> : null}
+          </div>
+        </>
       ) : (
         <div className="empty">Select a session or create one from the left.</div>
       )}

@@ -76,6 +76,9 @@ If two people have the same session open, they share one grok ACP turn. The serv
 - Thoughts are a collapsible `<details>` (diamond + `Thinking 3.1s` while that phase is live, `Thought for 4.2s` when it ends). Full thought text is inside, wrapped, never ellipsized. The dropdown stays open while that thought is streaming, then closes like the TUI.
 - Header activity chip is a runtime overlay (`idle` / `thinking 4.2s` / `working 26s` / `writing`), plus `updated Ns ago` so a stall is obvious. Driven by live SSE (last event kind + timestamps), not sqlite `session.status` alone. `session.status` stays `idle|running|error` in the DB. The chip never shows idle while a turn is sending, sqlite is running, or a tool is pending.
 - Transcripts persist under `dataRoot()/transcripts/<sessionId>.json` (`./data/transcripts` locally, `$BUILDINATOR_ROOT/data/transcripts` when set). SQLite indexes sessions including `acp_session_id` so `session/load` can resume grok's on-disk session under `GROK_HOME` after restart.
+- Refresh keeps the ACP session; we session/load the stored id; we only session/new when grok has no such session, and then we rehydrate from the UI transcript.
+- Live activity (thinking / working / writing) is pinned at the tail of the transcript, just above the composer. Consecutive identical tool runs collapse to one row (latest status); a different name starts a new line.
+- Files grok writes in the project sandbox appear in the artifacts **files** list with download. Refresh keeps the selected session in localStorage.
 
 ## Deploy (one VM)
 

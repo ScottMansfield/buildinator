@@ -97,3 +97,49 @@
   font-family: var(--mono);
   font-size: 12px;
 }
+
+.live-status {
+  flex-shrink: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 16px 8px;
+  border-top: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--muted);
+  background: var(--bg);
+}
+
+html[data-theme="tui"] .live-status {
+  border-top-color: #1a1a1a;
+}
+
+.live-status.thinking,
+.live-status.working,
+.live-status.writing {
+  color: var(--accent-2);
+}
+
+.live-status.idle {
+  color: var(--muted);
+}
+
+.live-status.error {
+  color: var(--danger);
+}
+
+.live-status-label {
+  letter-spacing: 0;
+}
+
+.phase-crumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 16px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+  opacity: 0.85;
+}
