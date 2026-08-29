@@ -69,7 +69,7 @@ export function LoginForm() {
           {error}
         </p>
         <button className="btn btn-accent" type="submit" disabled={pending}>
-          {pending ? "signing in" : "sign in"}
+          {pending ? "signing in…" : "sign in"}
         </button>
         <p className="login-hint">
           demo: scott / buildinator · guest / guest

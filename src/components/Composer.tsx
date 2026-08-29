@@ -66,7 +66,7 @@ export function Composer({
           rows={1}
           value={value}
           disabled={disabled}
-          placeholder={placeholder ?? "Message grok  /help"}
+          placeholder={placeholder ?? "Message grok…  /help"}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={onKeyDown}
         />

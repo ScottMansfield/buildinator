@@ -68,7 +68,7 @@ export function ChatPane({
         value={draft}
         onChange={onDraft}
         onSend={onSend}
-        disabled={!session || sending}
+        disabled={!session}
         readOnly={Boolean(session) && readOnly}
       />
     </section>

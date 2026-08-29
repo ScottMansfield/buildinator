@@ -48,7 +48,7 @@ export function ArtifactsPane({ artifacts, collapsed, onToggle }: Props) {
           artifacts.map((a) => (
             <article key={a.id} className="artifact">
               <header>
-                {a.kind} {a.title}
+                {a.kind} · {a.title}
               </header>
               <pre>{a.content}</pre>
             </article>
