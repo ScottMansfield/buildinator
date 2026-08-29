@@ -55,6 +55,17 @@ const REPLIES = [
 ];
 
 
+function dropLastUserTurn(t: Transcript): void {
+  let last = -1;
+  for (let i = t.messages.length - 1; i >= 0; i--) {
+    if (t.messages[i].role === "user") {
+      last = i;
+      break;
+    }
+  }
+  if (last >= 0) t.messages.splice(last);
+}
+
 function acpText(content: unknown): string {
   if (typeof content === "string") return content;
   if (content && typeof content === "object" && "text" in content) {
@@ -729,10 +740,20 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
     requireRole(summary.myRole, "write");
     const t = this.transcript(sessionId, summary.projectCwd);
     const now = new Date().toISOString();
+    let action = "No live grok session to compact";
+    if (grokAcpEnabled() && t.acpSessionId) {
+      try {
+        const client = getAcpClient();
+        await client.compactConversation(t.acpSessionId);
+        action = "Compacted grok context";
+      } catch (err) {
+        action = err instanceof Error ? err.message : "Compact failed";
+      }
+    }
     t.messages.push({
       id: newId(),
       role: "action",
-      content: "Compacted transcript (stub)",
+      content: action,
       createdAt: now,
     });
     updateSessionMeta(sessionId, { updatedAt: now });
@@ -748,17 +769,22 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
     requireRole(summary.myRole, "write");
     const t = this.transcript(sessionId, summary.projectCwd);
     const now = new Date().toISOString();
-    let removed = 0;
-    for (let i = t.messages.length - 1; i >= 0 && removed < 2; i--) {
-      if (t.messages[i].role === "user" || t.messages[i].role === "assistant") {
-        t.messages.splice(i, 1);
-        removed += 1;
+    let action = "Rewound last turn";
+    let applyLocal = true;
+    if (grokAcpEnabled() && t.acpSessionId) {
+      try {
+        const client = getAcpClient();
+        await client.rewindLastTurn(t.acpSessionId);
+      } catch (err) {
+        applyLocal = false;
+        action = err instanceof Error ? err.message : "Rewind failed";
       }
     }
+    if (applyLocal) dropLastUserTurn(t);
     t.messages.push({
       id: newId(),
       role: "action",
-      content: "Rewound to previous user turn (stub)",
+      content: action,
       createdAt: now,
     });
     updateSessionMeta(sessionId, { updatedAt: now });
