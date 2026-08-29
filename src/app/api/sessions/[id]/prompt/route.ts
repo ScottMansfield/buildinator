@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { getAdapter } from "@/lib/get-adapter";
 import { getSessionUser } from "@/lib/auth";
+import { grokAcpEnabled } from "@/lib/grok-cli";
 import { jsonError } from "@/lib/http";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -24,6 +26,9 @@ export async function POST(request: Request, ctx: Ctx) {
   }
   try {
     const session = await getAdapter().sendPrompt(user, id, body.prompt.trim());
+    if (grokAcpEnabled()) {
+      return NextResponse.json({ session }, { status: 202 });
+    }
     return NextResponse.json({ session });
   } catch (err) {
     return jsonError(err);
