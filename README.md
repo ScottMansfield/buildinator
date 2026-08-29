@@ -73,11 +73,13 @@ If two people have the same session open, they share one grok ACP turn. The serv
 - Cancel an in-flight ACP turn (Esc, header **cancel**, or `POST /api/sessions/:id/actions` `{ "type": "cancel" }`). Sends ACP `session/cancel`; does not kill `grok agent`. Queued follow-ups still send after the cancelled turn settles.
 - Untitled sessions (`New session`) take a title from the first prompt. `/rename` still wins. Resume/fork live on the session row, not as slashes.
 - Assistant markdown renders: GFM tables, fenced code, **bold**, headings. LaTeX `\\[ \\]`, `$$`, `\\( \\)` via KaTeX. Bare `$` prices stay text.
+- Thoughts are a collapsible `<details>` (diamond + `Thinking 3.1s` while that phase is live, `Thought for 4.2s` when it ends). Full thought text is inside, wrapped, never ellipsized. The dropdown stays open while that thought is streaming, then closes like the TUI.
+- Header activity chip is a runtime overlay (`idle` / `thinking 4.2s` / `working 26s` / `writing`), plus `updated Ns ago` so a stall is obvious. Driven by live SSE (last event kind + timestamps), not sqlite `session.status` alone. `session.status` stays `idle|running|error` in the DB. The chip never shows idle while a turn is sending, sqlite is running, or a tool is pending.
 - Transcripts persist under `dataRoot()/transcripts/<sessionId>.json` (`./data/transcripts` locally, `$BUILDINATOR_ROOT/data/transcripts` when set). SQLite indexes sessions including `acp_session_id` so `session/load` can resume grok's on-disk session under `GROK_HOME` after restart.
 
 ## Deploy (one VM)
 
-HTTPS UI is the only internet port (Caddy/nginx on 443 → Next on loopback 3000). systemd `User=buildinator`, `WorkingDirectory` the app root, `BUILDINATOR_ROOT=/mnt/buildinator` on a persistent disk (`data/`, `projects/`, `grok/`).
+HTTPS UI is the only internet port (Caddy/nginx on 443 → Next on loopback 3000). systemd `User=buildinator`, `WorkingDirectory` the app root, `BUILDINATOR_ROOT=/mnt/buildinator` on a persistent disk (`data/`, `projects/`, `grok/`). Caddy `reverse_proxy` should set `flush_interval -1` so SSE is not buffered.
 
 Grok runs as that same user with `GROK_ADAPTER=acp` and a consumer `grok login`. Always-approve for tools in the project sandbox.
 
@@ -88,7 +90,7 @@ See `Dockerfile` / `docker-compose.yml` for a containerized variant. Compose sti
 - Cookie JWT auth, scrypt passwords. Role is loaded from SQLite on each request (not trusted from the JWT). Google SSO is on hold.
 - SQLite WAL at `dataRoot()/buildinator.sqlite` (`./data/...` locally, `$BUILDINATOR_ROOT/data/...` when set).
 - Workspaces `projectsRoot()/<userId>/<projectId>/` (`./data/sandboxes/...` locally, `$BUILDINATOR_ROOT/projects/...` when set). Cross-project deps only via explicit links at `deps/<name>`.
-- ACP stdio + SSE streaming (thoughts, tokens, tools, plan artifact).
+- ACP stdio + SSE streaming (thoughts, tokens, tools, plan artifact). EventSource reconnects with backoff; the server replays a per-session ring of recent events, then continues live. Opening (or reconnecting) SSE also refetches `GET /api/sessions/:id` so missed chunks appear without a manual refresh.
 - Cancel in-flight ACP turn via `session/cancel` (write/owner). Mock running turns go idle; one-shot `grok -p` cannot cancel mid-process.
 - Session autotitle, queued composer, markdown+math in the transcript.
 - Account roles admin / write / read. Session shares owner / write / read.
