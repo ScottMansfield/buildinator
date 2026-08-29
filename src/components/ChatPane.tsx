@@ -11,6 +11,7 @@ type Props = {
   draft: string;
   onDraft: (v: string) => void;
   onSend: (text: string) => void;
+  onCancel?: () => void;
   sending: boolean;
   notice: string | null;
   role: AccessRole | null;
@@ -23,12 +24,15 @@ export function ChatPane({
   draft,
   onDraft,
   onSend,
+  onCancel,
   sending,
   notice,
   role,
   onShare,
 }: Props) {
   const readOnly = role === "read";
+  const running = Boolean(session && (session.status === "running" || sending));
+  const canCancel = Boolean(onCancel && running && role && role !== "read");
   const cwd = session?.projectCwd ?? project?.cwd ?? "";
   const usedIn = session?.tokenUsage?.input ?? 0;
   const usedOut = session?.tokenUsage?.output ?? 0;
@@ -41,6 +45,11 @@ export function ChatPane({
         </span>
         {session ? (
           <span className={"badge " + session.status}>{session.status}</span>
+        ) : null}
+        {canCancel ? (
+          <button type="button" className="btn btn-ghost composer-cancel" onClick={onCancel}>
+            cancel
+          </button>
         ) : null}
         {role && role !== "owner" ? (
           <span className="share-badge">{role === "write" ? "read-write" : "read-only"}</span>
@@ -68,8 +77,10 @@ export function ChatPane({
         value={draft}
         onChange={onDraft}
         onSend={onSend}
+        onCancel={canCancel ? onCancel : undefined}
         disabled={!session}
         readOnly={Boolean(session) && readOnly}
+        running={canCancel}
       />
     </section>
   );

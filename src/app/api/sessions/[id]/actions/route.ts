@@ -38,8 +38,12 @@ export async function POST(request: Request, ctx: Ctx) {
       const session = await adapter.rewindSession(user, id);
       return NextResponse.json({ session });
     }
+    if (type === "cancel") {
+      const session = await adapter.cancelSession(user, id);
+      return NextResponse.json({ session });
+    }
     return NextResponse.json(
-      { error: "type must be fork, resume, compact, or rewind" },
+      { error: "type must be fork, resume, compact, rewind, or cancel" },
       { status: 400 },
     );
   } catch (err) {

@@ -138,6 +138,7 @@ export interface GrokBuildAdapter {
   resumeSession(user: SessionUser, sessionId: string): Promise<SessionDetail>;
   compactSession(user: SessionUser, sessionId: string): Promise<SessionDetail>;
   rewindSession(user: SessionUser, sessionId: string): Promise<SessionDetail>;
+  cancelSession(user: SessionUser, sessionId: string): Promise<SessionDetail>;
   shareSession(
     user: SessionUser,
     sessionId: string,

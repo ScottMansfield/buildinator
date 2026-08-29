@@ -83,6 +83,9 @@ export class RemoteGrokAdapter implements GrokBuildAdapter {
   rewindSession(_user: SessionUser, _sessionId: string): Promise<SessionDetail> {
     return this.fail();
   }
+  cancelSession(_user: SessionUser, _sessionId: string): Promise<SessionDetail> {
+    return this.fail();
+  }
   shareSession(
     _user: SessionUser,
     _sessionId: string,

@@ -6,8 +6,10 @@ type Props = {
   value: string;
   onChange: (v: string) => void;
   onSend: (text: string) => void;
+  onCancel?: () => void;
   disabled?: boolean;
   readOnly?: boolean;
+  running?: boolean;
   placeholder?: string;
 };
 
@@ -15,8 +17,10 @@ export function Composer({
   value,
   onChange,
   onSend,
+  onCancel,
   disabled,
   readOnly,
+  running,
   placeholder,
 }: Props) {
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -33,6 +37,14 @@ export function Composer({
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Escape") {
+      if (running && onCancel) {
+        e.preventDefault();
+        e.stopPropagation();
+        onCancel();
+      }
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       submit();
@@ -74,11 +86,22 @@ export function Composer({
           <span className="block-cursor" aria-hidden />
         ) : null}
       </div>
-      <div className="composer-meta">
-        <span>Enter to send · Shift+Enter newline · /help /compact /rewind</span>
-        <button className="btn btn-accent composer-send" type="submit" disabled={disabled}>
-          send
-        </button>
+      <div className={"composer-meta" + (running ? " composer-meta-running" : "")}>
+        <span>
+          {running
+            ? "Enter queues · Shift+Enter newline · Esc cancel"
+            : "Enter to send · Shift+Enter newline · Esc cancel · /help /compact /rewind"}
+        </span>
+        <span className="composer-actions">
+          {running && onCancel ? (
+            <button className="btn composer-cancel" type="button" onClick={onCancel}>
+              cancel
+            </button>
+          ) : null}
+          <button className="btn btn-accent composer-send" type="submit" disabled={disabled}>
+            send
+          </button>
+        </span>
       </div>
     </form>
   );
