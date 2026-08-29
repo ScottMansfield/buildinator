@@ -9,6 +9,13 @@ export type SessionActivity = {
   lastEventAt: number;
 };
 
+/** Client-only ended-phase breadcrumb. Not persisted. */
+export type PhaseCrumb = {
+  id: string;
+  phase: ActivityPhase;
+  ms: number;
+};
+
 export const IDLE_ACTIVITY: SessionActivity = {
   phase: "idle",
   phaseStartedAt: 0,
