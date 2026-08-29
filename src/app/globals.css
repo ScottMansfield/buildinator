@@ -281,7 +281,6 @@ select.input {
 
 .session-row.active {
   background: var(--bg-elev-2);
-  outline: 1px solid var(--accent);
 }
 
 .session-item {
@@ -294,6 +293,15 @@ select.input {
   padding: 8px 10px;
   cursor: pointer;
   color: var(--text);
+}
+
+.session-item:hover,
+.session-row.active .session-item {
+  background: transparent;
+}
+
+.session-row.active {
+  outline: 1px solid var(--accent);
 }
 
 .session-title {
@@ -410,6 +418,15 @@ select.input {
 .msg-log {
   overflow: auto;
   flex: 1;
+  min-height: 0;
+}
+
+.chat-pane > .empty {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
 }
 
 .msg {
@@ -428,6 +445,27 @@ select.input {
 .msg.system {
   color: var(--muted);
   font-style: italic;
+}
+
+.msg.thought {
+  color: var(--muted);
+  font-size: 13px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.msg.thought .msg-role {
+  color: var(--muted);
+}
+
+.msg.thought .msg-body,
+.msg.thought .md-body {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+html[data-theme="tui"] .msg.thought .msg-role {
+  display: none;
 }
 
 .msg-role {
@@ -606,6 +644,8 @@ html[data-theme="tui"] .tool-card {
   padding: 10px;
   border-top: 1px solid var(--border);
   background: var(--bg-elev);
+  flex-shrink: 0;
+  margin-top: auto;
 }
 
 .composer-line {
@@ -637,6 +677,7 @@ html[data-theme="tui"] .composer-input {
   min-height: 28px;
   padding: 8px 0;
   caret-color: #e0e0e0;
+  caret-shape: block;
 }
 
 html[data-theme="tui"] .composer-send {
@@ -766,4 +807,124 @@ html[data-theme="tui"] .modal {
   overflow: hidden;
   clip: rect(0, 0, 0, 0);
   border: 0;
+}
+
+.md-body {
+  white-space: normal;
+}
+
+.md-body h1,
+.md-body h2,
+.md-body h3,
+.md-body h4,
+.md-body h5,
+.md-body h6 {
+  font-size: 14px;
+  color: var(--accent);
+  margin: 10px 0 6px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.md-body h1:first-child,
+.md-body h2:first-child,
+.md-body h3:first-child {
+  margin-top: 0;
+}
+
+.md-body p {
+  margin: 0 0 8px;
+}
+
+.md-body p:last-child {
+  margin-bottom: 0;
+}
+
+.md-body .table-wrap {
+  overflow-x: auto;
+  margin: 8px 0;
+}
+
+.md-body table {
+  border-collapse: collapse;
+  font-size: 12px;
+  width: max-content;
+  min-width: 100%;
+}
+
+.md-body th,
+.md-body td {
+  border: 1px solid var(--border);
+  padding: 3px 8px;
+}
+
+.md-body th {
+  color: var(--accent);
+  font-weight: 600;
+  text-align: left;
+  background: var(--bg-elev);
+}
+
+.md-body pre {
+  background: var(--bg-elev-2);
+  overflow-x: auto;
+  padding: 8px 10px;
+  margin: 8px 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.md-body pre code {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+}
+
+html[data-theme="tui"] .md-body pre code {
+  color: var(--text);
+}
+
+.md-body ul,
+.md-body ol {
+  margin: 6px 0 8px;
+  padding-left: 1.4em;
+}
+
+.md-body li {
+  margin: 2px 0;
+}
+
+.md-body li > p {
+  margin: 0;
+}
+
+.md-body strong {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.md-body blockquote {
+  margin: 8px 0;
+  padding: 2px 10px;
+  border-left: 2px solid var(--accent);
+  color: var(--muted);
+}
+
+.md-body hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 10px 0;
+}
+
+.md-body .katex {
+  color: inherit;
+  font-size: 1em;
+}
+
+.md-body .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  margin: 8px 0;
 }
