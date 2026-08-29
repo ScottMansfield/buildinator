@@ -213,6 +213,9 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
   private store: Store;
   private replyAt = 0;
   private acpTurns = new Map<string, Promise<void>>();
+  private turnSeq = new Map<string, number>();
+  private cancelRequested = new Map<string, number>();
+  private mockSleepers = new Map<string, Array<() => void>>();
 
   constructor() {
     const transcripts = seedTranscripts();
@@ -371,17 +374,75 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
     }
   }
 
+  private sleepInterruptible(sessionId: string, ms: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      let wake: () => void = () => {};
+      const timer = setTimeout(() => {
+        const list = this.mockSleepers.get(sessionId);
+        if (list) {
+          const next = list.filter((fn) => fn !== wake);
+          if (next.length) this.mockSleepers.set(sessionId, next);
+          else this.mockSleepers.delete(sessionId);
+        }
+        resolve(false);
+      }, ms);
+      wake = () => {
+        clearTimeout(timer);
+        resolve(true);
+      };
+      const list = this.mockSleepers.get(sessionId) ?? [];
+      list.push(wake);
+      this.mockSleepers.set(sessionId, list);
+    });
+  }
+
+  private interruptMockSleep(sessionId: string): void {
+    const list = this.mockSleepers.get(sessionId);
+    if (!list) return;
+    this.mockSleepers.delete(sessionId);
+    for (const wake of list) wake();
+  }
+
+  private settleCancelled(
+    user: SessionUser,
+    sessionId: string,
+    t: Transcript,
+  ): SessionDetail {
+    const now = new Date().toISOString();
+    t.messages.push({
+      id: newId(),
+      role: "action",
+      content: "Cancelled turn",
+      createdAt: now,
+    });
+    updateSessionMeta(sessionId, { status: "idle", updatedAt: now });
+    const updated = getAccessibleSummary(user.id, sessionId);
+    if (!updated) throw new NotFoundError("session not found");
+    touchInfo(t, updated);
+    saveTranscript(sessionId, t);
+    emit(sessionId, { type: "status", status: "idle" });
+    emit(sessionId, { type: "done", stopReason: "cancelled" });
+    return withTranscript(updated, t);
+  }
+
   private async runAcpTurn(
     user: SessionUser,
     sessionId: string,
     t: Transcript,
     prompt: string,
     cwd: string,
+    seq: number,
   ): Promise<void> {
     const persist = throttleSave(sessionId, t);
+    const cancelled = () => this.cancelRequested.get(sessionId) === seq;
+    const stillThisTurn = () => this.turnSeq.get(sessionId) === seq;
     try {
       const client = getAcpClient();
       await client.ensureProcess();
+      if (cancelled()) {
+        persist();
+        return;
+      }
       const previousId = t.acpSessionId;
       let loaded = false;
       if (previousId) {
@@ -391,6 +452,10 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
         } catch {
           loaded = false;
         }
+      }
+      if (cancelled()) {
+        persist();
+        return;
       }
       if (!loaded) {
         const created = await client.sessionNew(cwd);
@@ -405,12 +470,25 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
         }
         saveTranscript(sessionId, t);
       }
+      if (cancelled()) {
+        if (t.acpSessionId) client.sessionCancel(t.acpSessionId);
+        persist();
+        return;
+      }
 
       const assistantIds = new Map<string, string>();
       const thoughtIds = new Map<string, string>();
       const result = await client.sessionPrompt(t.acpSessionId!, prompt, (update) => {
         this.applyAcpUpdate(user, sessionId, t, update, assistantIds, thoughtIds, persist);
       });
+
+      persist();
+      saveTranscript(sessionId, t);
+      if (cancelled()) {
+        this.cancelRequested.delete(sessionId);
+        return;
+      }
+      if (!stillThisTurn()) return;
 
       const doneAt = new Date().toISOString();
       updateSessionMeta(sessionId, { status: "idle", updatedAt: doneAt });
@@ -420,6 +498,15 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
       emit(sessionId, { type: "status", status: "idle" });
       emit(sessionId, { type: "done", stopReason: result.stopReason });
     } catch (err) {
+      if (cancelled()) {
+        this.cancelRequested.delete(sessionId);
+        saveTranscript(sessionId, t);
+        return;
+      }
+      if (!stillThisTurn()) {
+        saveTranscript(sessionId, t);
+        return;
+      }
       const message = err instanceof Error ? err.message : "ACP turn failed";
       const now = new Date().toISOString();
       t.messages.push({
@@ -559,6 +646,8 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
     });
     maybeAutotitle(sessionId, summary.title, prompt);
     updateSessionMeta(sessionId, { status: "running", updatedAt: now });
+    const seq = (this.turnSeq.get(sessionId) ?? 0) + 1;
+    this.turnSeq.set(sessionId, seq);
 
     if (grokAcpEnabled()) {
       saveTranscript(sessionId, t);
@@ -569,8 +658,8 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
       setImmediate(() => {
         const prev = this.acpTurns.get(sessionId) ?? Promise.resolve();
         const run = prev.then(
-          () => this.runAcpTurn(user, sessionId, t, prompt, cwd),
-          () => this.runAcpTurn(user, sessionId, t, prompt, cwd),
+          () => this.runAcpTurn(user, sessionId, t, prompt, cwd, seq),
+          () => this.runAcpTurn(user, sessionId, t, prompt, cwd, seq),
         );
         this.acpTurns.set(sessionId, run);
       });
@@ -607,7 +696,12 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
         createdAt: new Date().toISOString(),
       });
     } else {
-      await new Promise((r) => setTimeout(r, 450));
+      const interrupted = await this.sleepInterruptible(sessionId, 450);
+      if (interrupted || this.cancelRequested.get(sessionId) === seq) {
+        const updated = getAccessibleSummary(user.id, sessionId);
+        if (!updated) throw new NotFoundError("session not found");
+        return withTranscript(updated, t);
+      }
 
       t.messages.push({
         id: newId(),
@@ -792,6 +886,26 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
     if (!updated) throw new NotFoundError("session not found");
     saveTranscript(sessionId, t);
     return withTranscript(updated, t);
+  }
+
+  async cancelSession(user: SessionUser, sessionId: string): Promise<SessionDetail> {
+    const summary = getAccessibleSummary(user.id, sessionId);
+    if (!summary) throw new NotFoundError("session not found");
+    requireRole(summary.myRole, "write");
+    if (summary.status !== "running") {
+      throw new AclError(409, "session is not running");
+    }
+    if (grokCliEnabled()) {
+      throw new AclError(409, "cannot cancel a one-shot grok -p turn");
+    }
+    const t = this.transcript(sessionId, summary.projectCwd);
+    const seq = this.turnSeq.get(sessionId) ?? 0;
+    this.cancelRequested.set(sessionId, seq);
+    this.interruptMockSleep(sessionId);
+    if (grokAcpEnabled() && t.acpSessionId) {
+      getAcpClient().sessionCancel(t.acpSessionId);
+    }
+    return this.settleCancelled(user, sessionId, t);
   }
 
   async shareSession(
