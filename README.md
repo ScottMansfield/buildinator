@@ -54,7 +54,7 @@ If two people have the same session open, they share one grok ACP turn. The serv
 - Cancel an in-flight ACP turn (Esc, header **cancel**, or `POST /api/sessions/:id/actions` `{ "type": "cancel" }`). Sends ACP `session/cancel`; does not kill `grok agent`. Queued follow-ups still send after the cancelled turn settles.
 - Untitled sessions (`New session`) take a title from the first prompt. `/rename` still wins. Resume/fork live on the session row, not as slashes.
 - Assistant markdown renders: GFM tables, fenced code, **bold**, headings. LaTeX `\\[ \\]`, `$$`, `\\( \\)` via KaTeX. Bare `$` prices stay text.
-- Transcripts persist at `data/transcripts/<sessionId>.json` (survive process restart). SQLite holds users, projects, sessions, shares.
+- Transcripts persist at `data/transcripts/<sessionId>.json` (chat source of truth). SQLite indexes sessions including `acp_session_id` so `session/load` can resume grok's on-disk session under `GROK_HOME` after restart.
 
 ## Deploy (one VM)
 
