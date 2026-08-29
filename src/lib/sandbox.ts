@@ -10,12 +10,47 @@ export function assertSafeSegment(segment: string, label = "segment"): string {
   return segment;
 }
 
+/** Absolute BUILDINATOR_ROOT when set (e.g. /mnt/buildinator). Unset in local-dev. */
+export function buildinatorRoot(): string | undefined {
+  const raw = process.env.BUILDINATOR_ROOT?.trim();
+  if (!raw) return undefined;
+  return path.resolve(raw);
+}
+
+/**
+ * sqlite + transcripts.
+ * BUILDINATOR_ROOT set → $BUILDINATOR_ROOT/data
+ * unset → ./data
+ */
 export function dataRoot(): string {
+  const root = buildinatorRoot();
+  if (root) return path.join(root, "data");
   return path.resolve(process.cwd(), "data");
 }
 
-export function sandboxRoot(): string {
+/**
+ * Project workspaces (today's sandboxes).
+ * BUILDINATOR_ROOT set → $BUILDINATOR_ROOT/projects  (not nested under data/)
+ * unset → ./data/sandboxes
+ */
+export function projectsRoot(): string {
+  const root = buildinatorRoot();
+  if (root) return path.join(root, "projects");
   return path.join(dataRoot(), "sandboxes");
+}
+
+export function sandboxRoot(): string {
+  return projectsRoot();
+}
+
+/**
+ * Documented GROK_HOME location when BUILDINATOR_ROOT is set:
+ * $BUILDINATOR_ROOT/grok. GROK_HOME is still read from env separately.
+ */
+export function grokRoot(): string | undefined {
+  const root = buildinatorRoot();
+  if (root) return path.join(root, "grok");
+  return undefined;
 }
 
 export function sandboxPath(ownerId: string, projectId: string): string {
@@ -32,6 +67,11 @@ export function sandboxPath(ownerId: string, projectId: string): string {
 
 export function displayCwd(projectName: string): string {
   return `~/projects/${projectName}`;
+}
+
+export function ensurePersistenceDirs(): void {
+  fs.mkdirSync(dataRoot(), { recursive: true });
+  fs.mkdirSync(projectsRoot(), { recursive: true });
 }
 
 export function ensureSandbox(ownerId: string, projectId: string): string {
