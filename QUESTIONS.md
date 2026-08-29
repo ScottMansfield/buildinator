@@ -30,7 +30,7 @@ Slash commands: /compact and /rewind stay in the composer.
 
 Status bar: model id **plus** variant (Grok 4.6 (high) · always-approve).
 
-Demo users: scott / buildinator and guest / guest.
+Demo login: scott / buildinator (admin), craig / buildinator (write). Guest is not seeded.
 
 ## Still open (v1.1+)
 

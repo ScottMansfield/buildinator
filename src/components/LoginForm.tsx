@@ -72,7 +72,7 @@ export function LoginForm() {
           {pending ? "signing in…" : "sign in"}
         </button>
         <p className="login-hint">
-          demo: scott / buildinator · guest / guest
+          demo: scott / buildinator (admin) · craig / buildinator (write)
         </p>
       </form>
     </div>

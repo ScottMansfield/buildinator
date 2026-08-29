@@ -53,7 +53,8 @@ Three panes:
 
 data/buildinator.sqlite (gitignored). WAL + busy_timeout=5000.
 
-- users — id, username, scrypt password hash
+- users — id, username, scrypt password hash, role (admin|write|read),
+  disabled
 - projects — id, owner_id, name (sandbox path derived, never stored
   as an arbitrary host path)
 - project_links — host project → other registered project as deps/<name>
@@ -80,7 +81,8 @@ that port.
 ## Auth
 
 Cookie JWT (HS256, jose). sub = user id, username claim. httpOnly,
-SameSite=lax, 7-day expiry. Seeded users hashed with scrypt.
+SameSite=lax, 7-day expiry. Authorization uses `users.role` from
+SQLite on each request, not the JWT. Seeded user hashed with scrypt.
 
 ## TUI
 
