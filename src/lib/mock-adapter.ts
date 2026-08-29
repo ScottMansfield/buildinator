@@ -22,7 +22,7 @@ import {
 import { AclError, NotFoundError } from "./errors";
 import { newId } from "./ids";
 import { grokAcpEnabled, grokCliEnabled, runGrokPrompt } from "./grok-cli";
-import { isUntitled, titleFromPrompt } from "./format";
+import { formatBytes, isUntitled, titleFromPrompt } from "./format";
 import {
   getAcpClient,
   isSessionNotFoundError,
@@ -33,6 +33,7 @@ import {
   destroySandbox,
   displayCwd,
   ensureSandbox,
+  listSandboxFiles,
   relativeSandboxPath,
   sandboxPath,
 } from "./sandbox";
@@ -204,6 +205,7 @@ function touchInfo(t: Transcript, session: SessionSummary): void {
 }
 
 function withTranscript(summary: SessionSummary, t: Transcript): SessionDetail {
+  syncSandboxFileArtifacts(summary.id, t);
   const clone = cloneTranscript(t);
   return {
     ...summary,
@@ -337,7 +339,7 @@ function upsertFileArtifact(
   persist: () => void,
 ): void {
   const now = new Date().toISOString();
-  const content = bytes != null ? `${bytes} bytes` : "";
+  const content = bytes != null ? formatBytes(bytes) : "";
   const existing = t.artifacts.find((a) => a.kind === "file" && a.title === relPath);
   if (existing) {
     existing.createdAt = now;
@@ -372,28 +374,38 @@ function recordSandboxWrite(
   upsertFileArtifact(sessionId, t, rel, bytes, persist);
 }
 
-function backfillFileArtifacts(sessionId: string, t: Transcript): boolean {
+/** Disk is source of truth for kind=file artifacts. Does not parse the transcript. */
+function syncSandboxFileArtifacts(sessionId: string, t: Transcript): void {
+  const others = t.artifacts.filter((a) => a.kind !== "file");
+  const prevFiles = t.artifacts.filter((a) => a.kind === "file");
   const sandbox = sandboxAbsForSession(sessionId);
-  if (!sandbox) return false;
-  let changed = false;
-  for (const tool of t.toolCalls) {
-    if (!isWriteLikeTool(tool.name)) continue;
-    const raw = writePathFromTool(tool.name, tool.input);
-    if (!raw) continue;
-    const rel = relativeSandboxPath(sandbox, raw);
-    if (!rel) continue;
-    if (t.artifacts.some((a) => a.kind === "file" && a.title === rel)) continue;
-    t.artifacts.push({
-      id: newId(),
-      sessionId,
-      kind: "file",
-      title: rel,
-      createdAt: tool.createdAt,
-      content: "",
-    });
-    changed = true;
+  if (!sandbox) {
+    t.artifacts = others;
+    return;
   }
-  return changed;
+  const listed = listSandboxFiles(sandbox);
+  const byTitle = new Map(prevFiles.map((a) => [a.title, a]));
+  const nextFiles: Artifact[] = [];
+  for (const f of listed) {
+    const existing = byTitle.get(f.rel);
+    const content = formatBytes(f.size);
+    const createdAt = new Date(f.mtimeMs).toISOString();
+    if (existing) {
+      existing.content = content;
+      existing.createdAt = createdAt;
+      nextFiles.push(existing);
+    } else {
+      nextFiles.push({
+        id: newId(),
+        sessionId,
+        kind: "file",
+        title: f.rel,
+        createdAt,
+        content,
+      });
+    }
+  }
+  t.artifacts = [...others, ...nextFiles];
 }
 
 export class MockGrokBuildAdapter implements GrokBuildAdapter {
@@ -832,7 +844,6 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
       const first = t.messages.find((m) => m.role === "user");
       if (first) maybeAutotitle(id, summary.title, first.content);
     }
-    if (backfillFileArtifacts(id, t)) saveTranscript(id, t);
     const latest = getAccessibleSummary(user.id, id) ?? summary;
     const detail = withTranscript(latest, t);
     if (summary.myRole === "owner") {
