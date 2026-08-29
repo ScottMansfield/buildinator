@@ -9,10 +9,21 @@ import {
   linkDep,
   sandboxPath,
 } from "./sandbox";
-import type { AccessRole, Project, SessionShare, SessionSummary, ShareRole } from "./types";
+import { parseUserRole } from "./acl";
+import { AclError, NotFoundError } from "./errors";
+import type {
+  AccessRole,
+  ManagedUser,
+  Project,
+  SessionShare,
+  SessionSummary,
+  SessionUser,
+  ShareRole,
+  UserRole,
+} from "./types";
 
 export const USER_SCOTT = "u-scott";
-export const USER_GUEST = "u-guest";
+export const USER_CRAIG = "u-craig";
 export const PROJ_BUILD = "p-buildinator";
 export const PROJ_INFRA = "p-infra";
 
@@ -27,6 +38,8 @@ export type UserRow = {
   id: string;
   username: string;
   password_hash: string;
+  role: string;
+  disabled: number;
   created_at: string;
 };
 
@@ -80,6 +93,8 @@ function migrate(db: InstanceType<typeof Database>) {
       id TEXT PRIMARY KEY,
       username TEXT NOT NULL UNIQUE COLLATE NOCASE,
       password_hash TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'write' CHECK(role IN ('admin','write','read')),
+      disabled INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL
     );
 
@@ -135,11 +150,70 @@ function migrate(db: InstanceType<typeof Database>) {
   if (!sessionCols.some((c) => c.name === "acp_session_id")) {
     db.exec("ALTER TABLE sessions ADD COLUMN acp_session_id TEXT");
   }
+
+  const userCols = db.prepare("PRAGMA table_info(users)").all() as Array<{ name: string }>;
+  if (!userCols.some((c) => c.name === "role")) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'write' CHECK(role IN ('admin','write','read'))",
+    );
+  }
+  if (!userCols.some((c) => c.name === "disabled")) {
+    db.exec("ALTER TABLE users ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0");
+  }
+  db.prepare(
+    "UPDATE users SET role = 'admin' WHERE username = 'scott' COLLATE NOCASE",
+  ).run();
+
+  const count = db.prepare("SELECT COUNT(*) AS n FROM users").get() as { n: number };
+  if (count.n > 0) {
+    deleteGuestUser(db);
+  }
+}
+
+function ensureCraigUser(db: InstanceType<typeof Database>) {
+  const existing = db
+    .prepare("SELECT id FROM users WHERE username = 'craig' COLLATE NOCASE")
+    .get() as { id: string } | undefined;
+  if (existing) return;
+  db.prepare(
+    "INSERT INTO users (id, username, password_hash, role, disabled, created_at) VALUES (?, ?, ?, 'write', 0, ?)",
+  ).run(USER_CRAIG, "craig", hashPassword("buildinator"), new Date().toISOString());
+}
+
+function deleteGuestUser(db: InstanceType<typeof Database>) {
+  const guests = db
+    .prepare("SELECT id FROM users WHERE username = 'guest' COLLATE NOCASE")
+    .all() as Array<{ id: string }>;
+  if (guests.length === 0) return;
+  const run = db.transaction(() => {
+    for (const g of guests) {
+      db.prepare("DELETE FROM session_shares WHERE user_id = ?").run(g.id);
+      const sessions = db
+        .prepare("SELECT id FROM sessions WHERE owner_id = ?")
+        .all(g.id) as Array<{ id: string }>;
+      for (const s of sessions) {
+        db.prepare("DELETE FROM session_shares WHERE session_id = ?").run(s.id);
+        db.prepare("DELETE FROM sessions WHERE id = ?").run(s.id);
+      }
+      const projects = db
+        .prepare("SELECT id FROM projects WHERE owner_id = ?")
+        .all(g.id) as Array<{ id: string }>;
+      for (const p of projects) {
+        db.prepare(
+          "DELETE FROM project_links WHERE project_id = ? OR linked_project_id = ?",
+        ).run(p.id, p.id);
+        db.prepare("DELETE FROM projects WHERE id = ?").run(p.id);
+      }
+      db.prepare("DELETE FROM users WHERE id = ?").run(g.id);
+    }
+  });
+  run();
 }
 
 function seed(db: InstanceType<typeof Database>) {
   const count = db.prepare("SELECT COUNT(*) AS n FROM users").get() as { n: number };
   if (count.n > 0) {
+    ensureCraigUser(db);
     ensureSandbox(USER_SCOTT, PROJ_BUILD);
     ensureSandbox(USER_SCOTT, PROJ_INFRA);
     try {
@@ -152,10 +226,10 @@ function seed(db: InstanceType<typeof Database>) {
 
   const now = new Date().toISOString();
   const insertUser = db.prepare(
-    "INSERT INTO users (id, username, password_hash, created_at) VALUES (?, ?, ?, ?)",
+    "INSERT INTO users (id, username, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?)",
   );
-  insertUser.run(USER_SCOTT, "scott", hashPassword("buildinator"), now);
-  insertUser.run(USER_GUEST, "guest", hashPassword("guest"), now);
+  insertUser.run(USER_SCOTT, "scott", hashPassword("buildinator"), "admin", now);
+  insertUser.run(USER_CRAIG, "craig", hashPassword("buildinator"), "write", now);
 
   const insertProject = db.prepare(
     "INSERT INTO projects (id, owner_id, name, created_at) VALUES (?, ?, ?, ?)",
@@ -205,12 +279,6 @@ function seed(db: InstanceType<typeof Database>) {
     hoursAgo(96), hoursAgo(50), 0, 0,
   );
 
-  const insertShare = db.prepare(
-    "INSERT INTO session_shares (id, session_id, user_id, role, created_at) VALUES (?, ?, ?, ?, ?)",
-  );
-  insertShare.run("sh-fly-guest", SESSION_FLY, USER_GUEST, "write", now);
-  insertShare.run("sh-nginx-guest", SESSION_NGINX, USER_GUEST, "read", now);
-
   ensureSandbox(USER_SCOTT, PROJ_BUILD);
   ensureSandbox(USER_SCOTT, PROJ_INFRA);
   linkDep(USER_SCOTT, PROJ_BUILD, "infra", USER_SCOTT, PROJ_INFRA);
@@ -246,6 +314,113 @@ export function findUserByUsername(username: string): UserRow | undefined {
 
 export function findUserById(id: string): UserRow | undefined {
   return getDb().prepare("SELECT * FROM users WHERE id = ?").get(id) as UserRow | undefined;
+}
+
+export function toSessionUser(row: UserRow): SessionUser | null {
+  if (row.disabled) return null;
+  return {
+    id: row.id,
+    username: row.username,
+    role: parseUserRole(row.role),
+  };
+}
+
+function toManagedUser(row: UserRow): ManagedUser {
+  return {
+    id: row.id,
+    username: row.username,
+    role: parseUserRole(row.role),
+    disabled: Boolean(row.disabled),
+    createdAt: row.created_at,
+  };
+}
+
+export function listManagedUsers(): ManagedUser[] {
+  const rows = getDb()
+    .prepare("SELECT * FROM users ORDER BY username COLLATE NOCASE")
+    .all() as UserRow[];
+  return rows.map(toManagedUser);
+}
+
+export function countActiveAdmins(exceptId?: string): number {
+  if (exceptId) {
+    const row = getDb()
+      .prepare(
+        "SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND disabled = 0 AND id != ?",
+      )
+      .get(exceptId) as { n: number };
+    return row.n;
+  }
+  const row = getDb()
+    .prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND disabled = 0")
+    .get() as { n: number };
+  return row.n;
+}
+
+function wouldDropLastAdmin(current: UserRow, nextRole: UserRole, nextDisabled: boolean): boolean {
+  const wasActiveAdmin = parseUserRole(current.role) === "admin" && !current.disabled;
+  const staysActiveAdmin = nextRole === "admin" && !nextDisabled;
+  return wasActiveAdmin && !staysActiveAdmin && countActiveAdmins(current.id) === 0;
+}
+
+export function insertUserRow(row: {
+  id: string;
+  username: string;
+  passwordHash: string;
+  role: UserRole;
+  createdAt: string;
+}): ManagedUser {
+  getDb()
+    .prepare(
+      "INSERT INTO users (id, username, password_hash, role, disabled, created_at) VALUES (?, ?, ?, ?, 0, ?)",
+    )
+    .run(row.id, row.username, row.passwordHash, row.role, row.createdAt);
+  const created = findUserById(row.id);
+  if (!created) throw new Error("failed to load created user");
+  return toManagedUser(created);
+}
+
+export function updateUserRow(
+  id: string,
+  patch: { role?: UserRole; passwordHash?: string; disabled?: boolean },
+): ManagedUser {
+  const current = findUserById(id);
+  if (!current) throw new NotFoundError("user not found");
+  const nextRole = patch.role ?? parseUserRole(current.role);
+  const nextDisabled = patch.disabled ?? Boolean(current.disabled);
+  if (wouldDropLastAdmin(current, nextRole, nextDisabled)) {
+    throw new AclError(400, "cannot remove the last admin");
+  }
+  getDb()
+    .prepare("UPDATE users SET role = ?, password_hash = ?, disabled = ? WHERE id = ?")
+    .run(
+      nextRole,
+      patch.passwordHash ?? current.password_hash,
+      nextDisabled ? 1 : 0,
+      id,
+    );
+  const updated = findUserById(id);
+  if (!updated) throw new NotFoundError("user not found");
+  return toManagedUser(updated);
+}
+
+export function deleteUserRow(id: string): void {
+  const current = findUserById(id);
+  if (!current) throw new NotFoundError("user not found");
+  if (wouldDropLastAdmin(current, "read", true)) {
+    throw new AclError(400, "cannot remove the last admin");
+  }
+  const owned = getDb()
+    .prepare(
+      `SELECT
+         (SELECT COUNT(*) FROM projects WHERE owner_id = ?) +
+         (SELECT COUNT(*) FROM sessions WHERE owner_id = ?) AS n`,
+    )
+    .get(id, id) as { n: number };
+  if (owned.n > 0) {
+    throw new AclError(409, "user owns projects or sessions; disable instead");
+  }
+  getDb().prepare("DELETE FROM users WHERE id = ?").run(id);
 }
 
 export function getProjectRow(id: string): ProjectRow | undefined {
