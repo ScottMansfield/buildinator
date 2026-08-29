@@ -14,11 +14,22 @@ export type AccessRole = "read" | "write" | "owner";
 
 export type ShareRole = "read" | "write";
 
+export type UserRole = "admin" | "write" | "read";
+
 export type MessageRole = "user" | "assistant" | "system" | "action" | "thought";
 
 export interface SessionUser {
   id: string;
   username: string;
+  role: UserRole;
+}
+
+export interface ManagedUser {
+  id: string;
+  username: string;
+  role: UserRole;
+  disabled: boolean;
+  createdAt: string;
 }
 
 export interface ProjectLink {
