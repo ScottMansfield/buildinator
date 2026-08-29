@@ -44,13 +44,14 @@ Anyone can create **their own** projects and sessions. They cannot create sessio
 
 1. Sign in as the owner. Open a session. **share** → username + `read-only` or `read-write`.
 2. The other user sees it under **shared with me**.
-3. Read-only: live chat + artifacts, composer locked. Read-write: prompt, rename, compact, rewind. Owner-only: share, delete, destroy sandbox.
+3. Read-only: live chat + artifacts, composer locked. Read-write: prompt, cancel in-flight turn, rename, compact, rewind. Owner-only: share, delete, destroy sandbox.
 
 If two people have the same session open, they share one grok ACP turn. The server fans `session/update` to every EventSource on that session. Sidebar-only is a snapshot until they click in.
 
 ## Chat behavior
 
 - Composer stays at the bottom, including empty sessions. Extra prompts queue and send in order (TUI-like).
+- Cancel an in-flight ACP turn (Esc, header **cancel**, or `POST /api/sessions/:id/actions` `{ "type": "cancel" }`). Sends ACP `session/cancel`; does not kill `grok agent`. Queued follow-ups still send after the cancelled turn settles.
 - Untitled sessions (`New session`) take a title from the first prompt. `/rename` still wins. Resume/fork live on the session row, not as slashes.
 - Assistant markdown renders: GFM tables, fenced code, **bold**, headings. LaTeX `\\[ \\]`, `$$`, `\\( \\)` via KaTeX. Bare `$` prices stay text.
 - Transcripts persist at `data/transcripts/<sessionId>.json` (survive process restart). SQLite holds users, projects, sessions, shares.
@@ -69,6 +70,7 @@ See `Dockerfile` / `docker-compose.yml` for a containerized variant. Compose sti
 - SQLite WAL at `data/buildinator.sqlite`.
 - Sandboxes `data/sandboxes/<userId>/<projectId>/`. Cross-project deps only via explicit links at `deps/<name>`.
 - ACP stdio + SSE streaming (thoughts, tokens, tools, plan artifact).
+- Cancel in-flight ACP turn via `session/cancel` (write/owner). Mock running turns go idle; one-shot `grok -p` cannot cancel mid-process.
 - Session autotitle, queued composer, markdown+math in the transcript.
 - Share roles owner / write / read.
 
