@@ -1,67 +1,84 @@
 # buildinator
 
-A browser frontend for managing Grok Build sessions
-(https://github.com/xai-org/grok-build).
+A browser session manager for [Grok Build](https://github.com/xai-org/grok-build).
 
-Scott likes the TUI. This is the session manager in a browser: every
-session grouped by project sandbox, a real chat transcript, artifacts
-on the right, and session sharing. Metadata lives in SQLite. Grok ACP
-is still a loopback stub — nothing is spawned yet.
+Scott likes the TUI. This is that session manager in a browser: projects as sandboxes, a real chat transcript, artifacts on the right, and per-conversation sharing. Metadata lives in SQLite. Live grok talks ACP over stdio (`grok agent --always-approve stdio`). Thoughts, tokens, and tool cards stream into the pane. The HTTPS UI is the only internet-facing port; grok never binds a public socket.
+
+Default theme is Grok Night (charcoal, `>` prompts, teal identifiers). `t` flips to the older `web` theme.
 
 ## Run it
 
-Copy .env.example to .env. Then fetch packages and start Next in dev mode (see package.json scripts). Production uses the build and start scripts.
+```bash
+cp .env.example .env
+npm install
+npm run dev
+```
 
 Open http://localhost:3000
 
+Production: `npm run build` then `npm start` (Next standalone). Copy `.env.example` and set `AUTH_SECRET`.
+
+`GROK_HOME` is grok's **config dir** (`~/.grok`), not `$HOME`. A logged-in grok CLI needs `GROK_HOME=/path/to/.grok` (for example `/opt/buildinator/.grok`) and `GROK_BIN` pointing at that tree's `bin/grok`.
+
+## Adapters (`GROK_ADAPTER`)
+
+| Value | What it does |
+| --- | --- |
+| `acp` | Spawn `grok agent --always-approve stdio`. `session/new` + `session/prompt`; `session/update` streams over SSE at `GET /api/sessions/:id/events`. Default in `.env.example`. |
+| `cli` / `grok` | One-shot `grok -p --always-approve`. Full reply when the process exits. |
+| `mock` | Canned replies. No grok binary. |
+| `remote` | Throws. HTTP/WebSocket `GROK_ACP_URL` (`grok agent serve`) is not wired. |
+
+ACP is stdio only. Do not publish an ACP port.
+
 ## Demo users
 
-- `scott` / `buildinator` — owns both projects and all seed sessions
-- `guest` / `guest` — read-write on "Bootstrap grok host on Fly.io",
-  read-only on "nginx ACP reverse proxy"
+Seeded on an empty database:
 
-## Sharing demo
+- `scott` / `buildinator` — owns the seed projects
+- `guest` / `guest` — used for share demos
 
-1. Sign in as scott. Open an infra session. Share is already seeded,
-   or use **share** to add `guest` as read-only / read-write.
-2. Log out, sign in as guest. Sidebar **shared with me** lists those
-   two infra sessions. Read-write can prompt / rename / compact /
-   rewind. Read-only sees chat + artifacts; the composer says
-   `read only`.
-3. New session: **+ new** (or `n`) and pick a project you **own**.
-   That writes a SQLite row and creates
-   `data/sandboxes/<userId>/<projectId>/`.
+Anyone can create **their own** projects and sessions. They cannot create sessions inside someone else's project. Share is per conversation, not per project.
 
-Session sharing shares the grok session (chat / tools / artifacts),
-not a second login on the host filesystem.
+## Sharing
+
+1. Sign in as the owner. Open a session. **share** → username + `read-only` or `read-write`.
+2. The other user sees it under **shared with me**.
+3. Read-only: live chat + artifacts, composer locked. Read-write: prompt, rename, compact, rewind. Owner-only: share, delete, destroy sandbox.
+
+If two people have the same session open, they share one grok ACP turn. The server fans `session/update` to every EventSource on that session. Sidebar-only is a snapshot until they click in.
+
+## Chat behavior
+
+- Composer stays at the bottom, including empty sessions. Extra prompts queue and send in order (TUI-like).
+- Untitled sessions (`New session`) take a title from the first prompt. `/rename` still wins. Resume/fork live on the session row, not as slashes.
+- Assistant markdown renders: GFM tables, fenced code, **bold**, headings. LaTeX `\\[ \\]`, `$$`, `\\( \\)` via KaTeX. Bare `$` prices stay text.
+- Transcripts persist at `data/transcripts/<sessionId>.json` (survive process restart). SQLite holds users, projects, sessions, shares.
 
 ## Deploy (one VM)
 
-`web` publishes 3000. Put Caddy/nginx in front for HTTPS on 443 — that
-is the only port that should face the internet.
+HTTPS UI is the only internet port (Caddy/nginx on 443 → Next on loopback 3000). systemd `User=buildinator`, `WorkingDirectory` the app root, `data/` on a persistent disk (sqlite + sandboxes + transcripts).
 
-Grok ACP is a sidecar bound to 127.0.0.1 (`GROK_ACP_URL`). Do not
-publish that port. See `docker-compose.yml`.
+Grok runs as that same user with `GROK_ADAPTER=acp` and a consumer `grok login`. Always-approve for tools in the project sandbox.
 
-## What you get in v1
+See `Dockerfile` / `docker-compose.yml` for a containerized variant. Compose still mentions `GROK_ACP_URL`; live mode is stdio, not that URL.
 
-- Cookie JWT auth. Passwords hashed with scrypt. Google SSO is on hold.
-- SQLite at `data/buildinator.sqlite` (WAL). Users, projects, links,
-  sessions, shares persist. Transcripts are still mock/in-memory.
-- Multi-tenant ACL: owner / read-write / read-only.
-- Sandboxes under `data/sandboxes/<userId>/<projectId>/`. Cross-project
-  deps mount at `deps/<name>` (seed: buildinator → infra).
-- Grok Night TUI is the default theme (screenshot-matched). Previous
-  dark UI is the `web` theme (`t`).
-- Slash commands in the composer: `/help`, `/rename`, `/compact`,
-  `/rewind`. **resume** and **fork** are session-row actions.
-- `RemoteGrokAdapter` stub. Loopback ACP only, not live.
+## What works
 
-## Limitations
+- Cookie JWT auth, scrypt passwords. Google SSO is on hold.
+- SQLite WAL at `data/buildinator.sqlite`.
+- Sandboxes `data/sandboxes/<userId>/<projectId>/`. Cross-project deps only via explicit links at `deps/<name>`.
+- ACP stdio + SSE streaming (thoughts, tokens, tools, plan artifact).
+- Session autotitle, queued composer, markdown+math in the transcript.
+- Share roles owner / write / read.
 
-- Mock backend. Nothing speaks ACP, nothing starts grok.
-- Transcripts reset on process restart; session index does not.
-- Prompt replies are canned.
+## Still open
+
+- `RemoteGrokAdapter` / `grok agent serve` (loopback WebSocket).
+- Permission prompts (ACP auto-allows).
+- `/compact` and `/rewind` are stubs. Fork starts a new ACP session.
+- Google SSO.
+- `package-lock.json` is not in git yet; `npm install` from `package.json` is enough.
 
 See PLAN.md, DESIGN.md, and QUESTIONS.md.
 
@@ -69,6 +86,6 @@ See PLAN.md, DESIGN.md, and QUESTIONS.md.
 
     src/app/            App Router pages plus API routes
     src/components/     Shell, sidebar, chat, artifacts, theme
-    src/lib/            auth, sqlite, acl, adapter
+    src/lib/            auth, sqlite, acl, grok ACP/cli, transcripts
     src/middleware.ts   cookie gate for /app and /api
-    data/               sqlite + sandboxes (gitignored)
+    data/               sqlite, sandboxes, transcripts (gitignored)
