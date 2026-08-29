@@ -696,6 +696,21 @@ html[data-theme="tui"] .composer-meta {
   display: none;
 }
 
+html[data-theme="tui"] .composer-meta.composer-meta-running {
+  display: flex;
+}
+
+.composer-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.composer-cancel {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
 .composer-readonly {
   display: flex;
   align-items: center;
