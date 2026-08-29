@@ -2,6 +2,7 @@
 
 import type { ChatMessage, ToolCall } from "@/lib/types";
 import { clockTime } from "@/lib/format";
+import { MarkdownBody } from "./MarkdownBody";
 
 function RichText({ text }: { text: string }) {
   const parts = text.split(/(`[^`]+`)/g);
@@ -62,7 +63,9 @@ export function MessageList({
 
   if (items.length === 0) {
     return (
-      <div className="empty">No messages yet. Type below or try /help.</div>
+      <div className="msg-log">
+        <div className="empty">No messages yet. Type below or try /help.</div>
+      </div>
     );
   }
 
@@ -76,6 +79,9 @@ export function MessageList({
           idx > 0 &&
           !(prev?.kind === "msg" && prev.msg.role === "user");
         if (item.kind === "msg") {
+          if (item.msg.role === "system" && /\/rename to set a title/i.test(item.msg.content)) {
+            return null;
+          }
           if (item.msg.role === "action") {
             return (
               <div key={item.msg.id} className="action-line">
@@ -84,6 +90,14 @@ export function MessageList({
                 </span>
                 {item.msg.content}
               </div>
+            );
+          }
+          if (item.msg.role === "thought") {
+            return (
+              <article key={item.msg.id} className="msg thought">
+                <div className="msg-role">thought</div>
+                <MarkdownBody text={item.msg.content} />
+              </article>
             );
           }
           return (
@@ -100,7 +114,7 @@ export function MessageList({
               ) : (
                 <>
                   <div className="msg-role">{item.msg.role}</div>
-                  <RichText text={item.msg.content} />
+                  <MarkdownBody text={item.msg.content} />
                 </>
               )}
             </article>

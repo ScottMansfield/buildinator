@@ -14,7 +14,7 @@ export type AccessRole = "read" | "write" | "owner";
 
 export type ShareRole = "read" | "write";
 
-export type MessageRole = "user" | "assistant" | "system" | "action";
+export type MessageRole = "user" | "assistant" | "system" | "action" | "thought";
 
 export interface SessionUser {
   id: string;
@@ -103,9 +103,19 @@ export interface SessionDetail extends SessionSummary {
   shares?: SessionShare[];
 }
 
+export type SessionStreamEvent =
+  | { type: "message"; id: string; role: "assistant"; content: string }
+  | { type: "thought"; id: string; content: string }
+  | { type: "tool"; tool: ToolCall }
+  | { type: "status"; status: SessionStatus }
+  | { type: "title"; title: string }
+  | { type: "done"; stopReason?: string }
+  | { type: "error"; message: string };
+
 export interface GrokBuildAdapter {
   listProjects(user: SessionUser): Promise<Project[]>;
   listOwnedProjects(user: SessionUser): Promise<Project[]>;
+  createProject(user: SessionUser, name: string): Promise<Project>;
   listSessions(user: SessionUser, projectId?: string): Promise<SessionSummary[]>;
   getSession(user: SessionUser, id: string): Promise<SessionDetail | null>;
   createSession(
