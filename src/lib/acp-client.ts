@@ -18,6 +18,93 @@ export type AcpUpdate = {
   [key: string]: unknown;
 };
 
+export class AcpError extends Error {
+  readonly code: number | undefined;
+  constructor(message: string, code?: number) {
+    super(message);
+    this.name = "AcpError";
+    this.code = code;
+  }
+}
+
+export type RewindPoint = {
+  promptIndex: number;
+  createdAt?: string;
+  numFileSnapshots?: number;
+  hasFileChanges?: boolean;
+  promptPreview?: string;
+};
+
+function asFiniteNumber(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+  }
+  return undefined;
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function asBoolean(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
+}
+
+export function parseRewindPoint(raw: unknown): RewindPoint | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const promptIndex = asFiniteNumber(o.prompt_index) ?? asFiniteNumber(o.promptIndex);
+  if (promptIndex == null) return null;
+  return {
+    promptIndex,
+    createdAt: asString(o.created_at) ?? asString(o.createdAt),
+    numFileSnapshots: asFiniteNumber(o.num_file_snapshots) ?? asFiniteNumber(o.numFileSnapshots),
+    hasFileChanges: asBoolean(o.has_file_changes) ?? asBoolean(o.hasFileChanges),
+    promptPreview: asString(o.prompt_preview) ?? asString(o.promptPreview),
+  };
+}
+
+export function parseRewindPoints(result: unknown): RewindPoint[] {
+  if (Array.isArray(result)) {
+    return result.map(parseRewindPoint).filter((p): p is RewindPoint => p != null);
+  }
+  if (!result || typeof result !== "object") return [];
+  const o = result as Record<string, unknown>;
+  const arr = o.rewind_points ?? o.rewindPoints;
+  if (!Array.isArray(arr)) return [];
+  return arr.map(parseRewindPoint).filter((p): p is RewindPoint => p != null);
+}
+
+export function highestRewindPoint(points: RewindPoint[]): RewindPoint | null {
+  if (points.length === 0) return null;
+  return points.reduce((best, p) => (p.promptIndex > best.promptIndex ? p : best));
+}
+
+export function compactSlashText(context?: string): string {
+  const note = context?.trim();
+  return note ? `/compact ${note}` : "/compact";
+}
+
+export function isMethodNotFound(err: unknown): boolean {
+  if (err instanceof AcpError && err.code === -32601) return true;
+  if (err && typeof err === "object" && (err as { code?: unknown }).code === -32601) {
+    return true;
+  }
+  const msg = err instanceof Error ? err.message : String(err ?? "");
+  return /method not found/i.test(msg);
+}
+
+function rewindExecuteSuccess(result: unknown): { success: boolean; message?: string } {
+  if (!result || typeof result !== "object") return { success: true };
+  const o = result as Record<string, unknown>;
+  const message = asString(o.message) ?? asString(o.error);
+  if (o.success === false) return { success: false, message };
+  return { success: true, message };
+}
+
+
 type Pending = {
   resolve: (value: unknown) => void;
   reject: (err: Error) => void;
@@ -168,11 +255,13 @@ class AcpClient {
       this.pending.delete(id);
       if (msg.error) {
         const err = msg.error as { message?: unknown; code?: unknown };
+        const code = typeof err.code === "number" ? err.code : undefined;
         p.reject(
-          new Error(
+          new AcpError(
             typeof err.message === "string"
               ? err.message
               : `ACP error ${err.code ?? ""}`.trim(),
+            code,
           ),
         );
       } else {
@@ -501,6 +590,44 @@ class AcpClient {
 
   sessionCancel(acpId: string): void {
     this.write({ jsonrpc: "2.0", method: "session/cancel", params: { sessionId: acpId } });
+  }
+
+  async compactConversation(sessionId: string, context?: string): Promise<void> {
+    await this.ensureProcess();
+    const params: { sessionId: string; context?: string } = { sessionId };
+    const note = context?.trim();
+    if (note) params.context = note;
+    try {
+      await this.request("_x.ai/compact_conversation", params);
+    } catch (err) {
+      if (!isMethodNotFound(err)) throw err;
+      await this.request("session/prompt", {
+        sessionId,
+        prompt: [{ type: "text", text: compactSlashText(note) }],
+      });
+    }
+  }
+
+  async listRewindPoints(sessionId: string): Promise<RewindPoint[]> {
+    await this.ensureProcess();
+    const result = await this.request("_x.ai/rewind/points", { sessionId });
+    return parseRewindPoints(result);
+  }
+
+  async rewindLastTurn(sessionId: string): Promise<void> {
+    const tip = highestRewindPoint(await this.listRewindPoints(sessionId));
+    if (!tip) throw new Error("No rewind points in grok session");
+    await this.ensureProcess();
+    const result = await this.request("_x.ai/rewind/execute", {
+      sessionId,
+      targetPromptIndex: tip.promptIndex,
+      mode: "conversation_only",
+      force: true,
+    });
+    const outcome = rewindExecuteSuccess(result);
+    if (!outcome.success) {
+      throw new Error(outcome.message || "grok rewind failed");
+    }
   }
 }
 
