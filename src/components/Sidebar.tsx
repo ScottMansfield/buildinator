@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { Project, SessionSummary } from "@/lib/types";
 import { relativeTime } from "@/lib/format";
 import { can } from "@/lib/acl";
@@ -49,6 +49,10 @@ function SessionRow({
   const [menu, setMenu] = useState(false);
   const write = canWrite && can(s.myRole, "write");
   const owner = canWrite && can(s.myRole, "owner");
+
+  useEffect(() => {
+    if (!editing) setTitle(s.title);
+  }, [s.title, editing]);
 
   function submitRename(e?: FormEvent) {
     e?.preventDefault();
