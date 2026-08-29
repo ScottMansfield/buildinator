@@ -18,7 +18,19 @@ Open http://localhost:3000
 
 Production: `npm run build` then `npm start` (Next standalone). Copy `.env.example` and set `AUTH_SECRET`.
 
-`GROK_HOME` is grok's **config dir** (`~/.grok`), not `$HOME`. A logged-in grok CLI needs `GROK_HOME=/path/to/.grok` (for example `/opt/buildinator/.grok`) and `GROK_BIN` pointing at that tree's `bin/grok`.
+`GROK_HOME` is grok's **config dir**, not `$HOME`. Set it separately from `BUILDINATOR_ROOT` (it is not inferred). On the VM: `GROK_HOME=/mnt/buildinator/grok` (that is `$BUILDINATOR_ROOT/grok`) and `GROK_BIN` pointing at that tree's `bin/grok`. Local-dev can keep `GROK_HOME` at a `.grok` dir such as `/opt/buildinator/.grok`.
+
+## Persistence (`BUILDINATOR_ROOT`)
+
+Set `BUILDINATOR_ROOT` (for example `/mnt/buildinator`) so sqlite, workspaces, and grok state live on a disk that survives VM replacement. Do not hardcode `/var/lib/buildinator`.
+
+| Path | What |
+| --- | --- |
+| `$BUILDINATOR_ROOT/data` | sqlite (`buildinator.sqlite`) + transcripts |
+| `$BUILDINATOR_ROOT/projects` | workspaces (today's sandboxes). **Not** nested under `data/`. |
+| `$BUILDINATOR_ROOT/grok` | `GROK_HOME` — login + ACP session blobs. Set `GROK_HOME` in `.env` yourself. |
+
+If `BUILDINATOR_ROOT` is **unset** (local-dev): sqlite + transcripts at `./data`, workspaces at `./data/sandboxes`. Display cwd stays `~/projects/<name>` either way.
 
 ## Adapters (`GROK_ADAPTER`)
 
@@ -61,11 +73,11 @@ If two people have the same session open, they share one grok ACP turn. The serv
 - Cancel an in-flight ACP turn (Esc, header **cancel**, or `POST /api/sessions/:id/actions` `{ "type": "cancel" }`). Sends ACP `session/cancel`; does not kill `grok agent`. Queued follow-ups still send after the cancelled turn settles.
 - Untitled sessions (`New session`) take a title from the first prompt. `/rename` still wins. Resume/fork live on the session row, not as slashes.
 - Assistant markdown renders: GFM tables, fenced code, **bold**, headings. LaTeX `\\[ \\]`, `$$`, `\\( \\)` via KaTeX. Bare `$` prices stay text.
-- Transcripts persist at `data/transcripts/<sessionId>.json` (chat source of truth). SQLite indexes sessions including `acp_session_id` so `session/load` can resume grok's on-disk session under `GROK_HOME` after restart.
+- Transcripts persist under `dataRoot()/transcripts/<sessionId>.json` (`./data/transcripts` locally, `$BUILDINATOR_ROOT/data/transcripts` when set). SQLite indexes sessions including `acp_session_id` so `session/load` can resume grok's on-disk session under `GROK_HOME` after restart.
 
 ## Deploy (one VM)
 
-HTTPS UI is the only internet port (Caddy/nginx on 443 → Next on loopback 3000). systemd `User=buildinator`, `WorkingDirectory` the app root, `data/` on a persistent disk (sqlite + sandboxes + transcripts).
+HTTPS UI is the only internet port (Caddy/nginx on 443 → Next on loopback 3000). systemd `User=buildinator`, `WorkingDirectory` the app root, `BUILDINATOR_ROOT=/mnt/buildinator` on a persistent disk (`data/`, `projects/`, `grok/`).
 
 Grok runs as that same user with `GROK_ADAPTER=acp` and a consumer `grok login`. Always-approve for tools in the project sandbox.
 
@@ -74,8 +86,8 @@ See `Dockerfile` / `docker-compose.yml` for a containerized variant. Compose sti
 ## What works
 
 - Cookie JWT auth, scrypt passwords. Role is loaded from SQLite on each request (not trusted from the JWT). Google SSO is on hold.
-- SQLite WAL at `data/buildinator.sqlite`.
-- Sandboxes `data/sandboxes/<userId>/<projectId>/`. Cross-project deps only via explicit links at `deps/<name>`.
+- SQLite WAL at `dataRoot()/buildinator.sqlite` (`./data/...` locally, `$BUILDINATOR_ROOT/data/...` when set).
+- Workspaces `projectsRoot()/<userId>/<projectId>/` (`./data/sandboxes/...` locally, `$BUILDINATOR_ROOT/projects/...` when set). Cross-project deps only via explicit links at `deps/<name>`.
 - ACP stdio + SSE streaming (thoughts, tokens, tools, plan artifact).
 - Cancel in-flight ACP turn via `session/cancel` (write/owner). Mock running turns go idle; one-shot `grok -p` cannot cancel mid-process.
 - Session autotitle, queued composer, markdown+math in the transcript.
@@ -98,4 +110,5 @@ See PLAN.md, DESIGN.md, and QUESTIONS.md.
     src/components/     Shell, sidebar, chat, artifacts, theme
     src/lib/            auth, sqlite, acl, grok ACP/cli, transcripts
     src/middleware.ts   cookie gate for /app and /api
-    data/               sqlite, sandboxes, transcripts (gitignored)
+    data/               local-dev sqlite, sandboxes, transcripts (gitignored)
+    $BUILDINATOR_ROOT   VM: data/ + projects/ + grok/ on persistent disk
