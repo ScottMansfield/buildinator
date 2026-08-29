@@ -1,0 +1,45 @@
+.users-modal {
+  width: min(640px, calc(100% - 32px));
+}
+
+.users-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 12px;
+}
+
+.users-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.users-list li > span {
+  flex: 1 1 90px;
+  min-width: 80px;
+}
+
+.users-list li select {
+  width: auto;
+  min-width: 88px;
+}
+
+.users-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto auto;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.users-pw {
+  display: flex;
+  gap: 6px;
+  flex: 1 1 180px;
+}
+
+html[data-theme="tui"] .users-modal {
+  border-radius: 0;
+}
