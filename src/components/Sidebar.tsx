@@ -12,6 +12,7 @@ type Props = {
   selectedId: string | null;
   onSelect: (id: string) => void;
   onNew: (projectId: string) => void;
+  onNewProject: (name: string) => void;
   onRename: (id: string, title: string) => void;
   onResume: (id: string) => void;
   onFork: (id: string) => void;
@@ -185,6 +186,7 @@ export function Sidebar({
   selectedId,
   onSelect,
   onNew,
+  onNewProject,
   onRename,
   onResume,
   onFork,
@@ -196,6 +198,8 @@ export function Sidebar({
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [picker, setPicker] = useState(false);
   const [pickId, setPickId] = useState(owned[0]?.id ?? "");
+  const [projectForm, setProjectForm] = useState(false);
+  const [projectName, setProjectName] = useState("");
 
   const ownedIds = useMemo(() => new Set(owned.map((p) => p.id)), [owned]);
 
@@ -234,19 +238,33 @@ export function Sidebar({
     <nav className="pane" aria-label="Sessions">
       <div className="pane-header">
         sessions
-        {owned.length > 0 ? (
+        <span style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
           <button
             type="button"
             className="btn btn-ghost"
-            style={{ marginLeft: "auto", padding: "2px 8px" }}
+            style={{ padding: "2px 8px" }}
             onClick={() => {
-              setPickId(owned[0]?.id ?? "");
-              setPicker(true);
+              setProjectForm(true);
+              setPicker(false);
             }}
           >
-            + new
+            + project
           </button>
-        ) : null}
+          {owned.length > 0 ? (
+            <button
+              type="button"
+              className="btn btn-ghost"
+              style={{ padding: "2px 8px" }}
+              onClick={() => {
+                setPickId(owned[0]?.id ?? "");
+                setPicker(true);
+                setProjectForm(false);
+              }}
+            >
+              + session
+            </button>
+          ) : null}
+        </span>
       </div>
       <div style={{ padding: 8 }}>
         <label className="sr-only" htmlFor="session-search">
@@ -255,11 +273,51 @@ export function Sidebar({
         <input
           id="session-search"
           className="input"
-          placeholder="Search sessions"
+          placeholder="Search sessions…"
           value={search}
           onChange={(e) => onSearch(e.target.value)}
         />
       </div>
+
+      {projectForm ? (
+        <form
+          className="new-session-picker"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const name = projectName.trim();
+            if (!name) return;
+            onNewProject(name);
+            setProjectName("");
+            setProjectForm(false);
+          }}
+        >
+          <label className="sr-only" htmlFor="new-project-name">
+            Project name
+          </label>
+          <input
+            id="new-project-name"
+            className="input"
+            placeholder="project name"
+            value={projectName}
+            autoFocus
+            maxLength={40}
+            onChange={(e) => setProjectName(e.target.value)}
+          />
+          <button className="btn btn-accent" type="submit">
+            create project
+          </button>
+          <button
+            className="btn btn-ghost"
+            type="button"
+            onClick={() => {
+              setProjectForm(false);
+              setProjectName("");
+            }}
+          >
+            cancel
+          </button>
+        </form>
+      ) : null}
       {picker ? (
         <form
           className="new-session-picker"
@@ -309,7 +367,7 @@ export function Sidebar({
                   setCollapsed((c) => ({ ...c, [project.id]: !isCollapsed }))
                 }
               >
-                <span aria-hidden="true">{isCollapsed ? ">" : "v"}</span>
+                <span aria-hidden="true">{isCollapsed ? "▸" : "▾"}</span>
                 {project.name}
                 <span style={{ marginLeft: "auto", color: "var(--muted)" }}>
                   {items.length}
