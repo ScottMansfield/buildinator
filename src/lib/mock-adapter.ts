@@ -209,6 +209,30 @@ function maybeAutotitle(sessionId: string, currentTitle: string, prompt: string)
   return next;
 }
 
+function trimId(value: string | null | undefined): string | undefined {
+  const s = value?.trim();
+  return s ? s : undefined;
+}
+
+/** Transcript JSON is chat source of truth; sqlite is the resume index. */
+function resolveAcpSessionId(sessionId: string, t: Transcript): string | undefined {
+  const fromTranscript = trimId(t.acpSessionId);
+  const fromDb = trimId(getSessionRow(sessionId)?.acp_session_id);
+  const id = fromTranscript || fromDb;
+  if (!id) return undefined;
+  if (t.acpSessionId !== id) t.acpSessionId = id;
+  if (fromDb !== id) {
+    updateSessionMeta(sessionId, { acpSessionId: id });
+  }
+  return id;
+}
+
+function persistAcpSessionId(sessionId: string, t: Transcript, acpId: string | null): void {
+  if (acpId) t.acpSessionId = acpId;
+  else delete t.acpSessionId;
+  updateSessionMeta(sessionId, { acpSessionId: acpId });
+}
+
 export class MockGrokBuildAdapter implements GrokBuildAdapter {
   private store: Store;
   private replyAt = 0;
@@ -443,7 +467,7 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
         persist();
         return;
       }
-      const previousId = t.acpSessionId;
+      const previousId = resolveAcpSessionId(sessionId, t);
       let loaded = false;
       if (previousId) {
         try {
@@ -459,7 +483,7 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
       }
       if (!loaded) {
         const created = await client.sessionNew(cwd);
-        t.acpSessionId = created;
+        persistAcpSessionId(sessionId, t, created);
         if (previousId) {
           t.messages.push({
             id: newId(),
@@ -782,6 +806,7 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
       updatedAt: now,
       tokenInput: summary.tokenUsage?.input ?? 0,
       tokenOutput: summary.tokenUsage?.output ?? 0,
+      acpSessionId: null,
     });
     const copied = cloneTranscript(src);
     delete copied.acpSessionId;
@@ -805,11 +830,12 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
     const t = this.transcript(sessionId, summary.projectCwd);
     const now = new Date().toISOString();
     let action = "Resumed session";
-    if (grokAcpEnabled() && t.acpSessionId) {
+    const acpId = resolveAcpSessionId(sessionId, t);
+    if (grokAcpEnabled() && acpId) {
       try {
         const client = getAcpClient();
         await client.ensureProcess();
-        await client.sessionLoad(t.acpSessionId);
+        await client.sessionLoad(acpId);
         action = "Resumed ACP session";
       } catch {
         action = "ACP session/load failed; next prompt will session/new";
@@ -835,10 +861,11 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
     const t = this.transcript(sessionId, summary.projectCwd);
     const now = new Date().toISOString();
     let action = "No live grok session to compact";
-    if (grokAcpEnabled() && t.acpSessionId) {
+    const compactId = resolveAcpSessionId(sessionId, t);
+    if (grokAcpEnabled() && compactId) {
       try {
         const client = getAcpClient();
-        await client.compactConversation(t.acpSessionId);
+        await client.compactConversation(compactId);
         action = "Compacted grok context";
       } catch (err) {
         action = err instanceof Error ? err.message : "Compact failed";
@@ -865,10 +892,11 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
     const now = new Date().toISOString();
     let action = "Rewound last turn";
     let applyLocal = true;
-    if (grokAcpEnabled() && t.acpSessionId) {
+    const rewindId = resolveAcpSessionId(sessionId, t);
+    if (grokAcpEnabled() && rewindId) {
       try {
         const client = getAcpClient();
-        await client.rewindLastTurn(t.acpSessionId);
+        await client.rewindLastTurn(rewindId);
       } catch (err) {
         applyLocal = false;
         action = err instanceof Error ? err.message : "Rewind failed";
@@ -902,8 +930,9 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
     const seq = this.turnSeq.get(sessionId) ?? 0;
     this.cancelRequested.set(sessionId, seq);
     this.interruptMockSleep(sessionId);
-    if (grokAcpEnabled() && t.acpSessionId) {
-      getAcpClient().sessionCancel(t.acpSessionId);
+    const cancelId = resolveAcpSessionId(sessionId, t);
+    if (grokAcpEnabled() && cancelId) {
+      getAcpClient().sessionCancel(cancelId);
     }
     return this.settleCancelled(user, sessionId, t);
   }
