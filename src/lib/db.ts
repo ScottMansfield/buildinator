@@ -50,6 +50,7 @@ export type SessionRow = {
   updated_at: string;
   token_input: number;
   token_output: number;
+  acp_session_id: string | null;
 };
 
 export type ShareRow = {
@@ -110,7 +111,8 @@ function migrate(db: InstanceType<typeof Database>) {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       token_input INTEGER NOT NULL DEFAULT 0,
-      token_output INTEGER NOT NULL DEFAULT 0
+      token_output INTEGER NOT NULL DEFAULT 0,
+      acp_session_id TEXT
     );
 
     CREATE TABLE IF NOT EXISTS session_shares (
@@ -126,6 +128,13 @@ function migrate(db: InstanceType<typeof Database>) {
     CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id);
     CREATE INDEX IF NOT EXISTS idx_shares_user ON session_shares(user_id);
   `);
+
+  // Existing WAL DBs were created without acp_session_id. ALTER is a no-op
+  // once the column exists (CREATE TABLE IF NOT EXISTS does not add columns).
+  const sessionCols = db.prepare("PRAGMA table_info(sessions)").all() as Array<{ name: string }>;
+  if (!sessionCols.some((c) => c.name === "acp_session_id")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN acp_session_id TEXT");
+  }
 }
 
 function seed(db: InstanceType<typeof Database>) {
@@ -373,13 +382,14 @@ export function insertSession(row: {
   updatedAt: string;
   tokenInput?: number;
   tokenOutput?: number;
+  acpSessionId?: string | null;
 }): void {
   getDb()
     .prepare(
       `INSERT INTO sessions (
         id, project_id, owner_id, title, status, model, variant, approval,
-        created_at, updated_at, token_input, token_output
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        created_at, updated_at, token_input, token_output, acp_session_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       row.id,
@@ -394,6 +404,7 @@ export function insertSession(row: {
       row.updatedAt,
       row.tokenInput ?? 0,
       row.tokenOutput ?? 0,
+      row.acpSessionId ?? null,
     );
 }
 
@@ -405,13 +416,16 @@ export function updateSessionMeta(
     updatedAt: string;
     tokenInput: number;
     tokenOutput: number;
+    acpSessionId: string | null;
   }>,
 ): void {
   const current = getSessionRow(id);
   if (!current) return;
+  const acpSessionId =
+    patch.acpSessionId === undefined ? current.acp_session_id : patch.acpSessionId;
   getDb()
     .prepare(
-      `UPDATE sessions SET title = ?, status = ?, updated_at = ?, token_input = ?, token_output = ? WHERE id = ?`,
+      `UPDATE sessions SET title = ?, status = ?, updated_at = ?, token_input = ?, token_output = ?, acp_session_id = ? WHERE id = ?`,
     )
     .run(
       patch.title ?? current.title,
@@ -419,6 +433,7 @@ export function updateSessionMeta(
       patch.updatedAt ?? current.updated_at,
       patch.tokenInput ?? current.token_input,
       patch.tokenOutput ?? current.token_output,
+      acpSessionId,
       id,
     );
 }
