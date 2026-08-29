@@ -20,6 +20,7 @@ type Props = {
   onDelete: (id: string) => void;
   search: string;
   onSearch: (q: string) => void;
+  canWrite: boolean;
 };
 
 function SessionRow({
@@ -31,6 +32,7 @@ function SessionRow({
   onFork,
   onShare,
   onDelete,
+  canWrite,
 }: {
   s: SessionSummary;
   selected: boolean;
@@ -40,12 +42,13 @@ function SessionRow({
   onFork: (id: string) => void;
   onShare: (id: string) => void;
   onDelete: (id: string) => void;
+  canWrite: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(s.title);
   const [menu, setMenu] = useState(false);
-  const write = can(s.myRole, "write");
-  const owner = can(s.myRole, "owner");
+  const write = canWrite && can(s.myRole, "write");
+  const owner = canWrite && can(s.myRole, "owner");
 
   function submitRename(e?: FormEvent) {
     e?.preventDefault();
@@ -194,6 +197,7 @@ export function Sidebar({
   onDelete,
   search,
   onSearch,
+  canWrite,
 }: Props) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [picker, setPicker] = useState(false);
@@ -239,18 +243,20 @@ export function Sidebar({
       <div className="pane-header">
         sessions
         <span style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
-          <button
-            type="button"
-            className="btn btn-ghost"
-            style={{ padding: "2px 8px" }}
-            onClick={() => {
-              setProjectForm(true);
-              setPicker(false);
-            }}
-          >
-            + project
-          </button>
-          {owned.length > 0 ? (
+          {canWrite ? (
+            <button
+              type="button"
+              className="btn btn-ghost"
+              style={{ padding: "2px 8px" }}
+              onClick={() => {
+                setProjectForm(true);
+                setPicker(false);
+              }}
+            >
+              + project
+            </button>
+          ) : null}
+          {canWrite && owned.length > 0 ? (
             <button
               type="button"
               className="btn btn-ghost"
@@ -279,7 +285,7 @@ export function Sidebar({
         />
       </div>
 
-      {projectForm ? (
+      {canWrite && projectForm ? (
         <form
           className="new-session-picker"
           onSubmit={(e) => {
@@ -318,7 +324,7 @@ export function Sidebar({
           </button>
         </form>
       ) : null}
-      {picker ? (
+      {canWrite && picker ? (
         <form
           className="new-session-picker"
           onSubmit={(e) => {
@@ -392,8 +398,10 @@ export function Sidebar({
                       onFork={onFork}
                       onShare={onShare}
                       onDelete={onDelete}
+                      canWrite={canWrite}
                     />
                   ))}
+                  {canWrite ? (
                   <div style={{ padding: "4px 10px 10px" }}>
                     <button
                       type="button"
@@ -403,6 +411,7 @@ export function Sidebar({
                       + new session
                     </button>
                   </div>
+                  ) : null}
                 </>
               )}
             </div>
@@ -422,6 +431,7 @@ export function Sidebar({
                 onFork={onFork}
                 onShare={onShare}
                 onDelete={onDelete}
+                canWrite={canWrite}
               />
             ))}
           </div>
@@ -440,6 +450,7 @@ export function Sidebar({
                 onFork={onFork}
                 onShare={onShare}
                 onDelete={onDelete}
+                canWrite={canWrite}
               />
             ))}
           </div>
