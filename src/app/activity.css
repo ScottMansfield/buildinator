@@ -1,0 +1,99 @@
+/* Live activity chip + collapsible thoughts (Grok Night). Full text wraps; no ellipsis. */
+
+.activity-chip {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--muted);
+}
+
+.activity-chip.thinking,
+.activity-chip.working,
+.activity-chip.writing {
+  color: var(--accent-2);
+}
+
+.activity-chip.idle {
+  color: var(--muted);
+}
+
+.activity-chip.error {
+  color: var(--danger);
+}
+
+.activity-updated {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: none;
+}
+
+.thought-block {
+  color: var(--muted);
+  padding: 2px 0;
+}
+
+.thought-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 16px;
+  cursor: pointer;
+  list-style: none;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 13px;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.thought-summary::-webkit-details-marker,
+.thought-block > summary::marker {
+  display: none;
+  content: "";
+}
+
+.thought-body {
+  padding: 2px 16px 8px 36px;
+  color: var(--muted);
+  white-space: pre-wrap;
+  overflow: visible;
+  max-height: none;
+  text-overflow: unset;
+  word-break: break-word;
+}
+
+.thought-body .md-body,
+.thought-body .msg-body,
+.thought-body p,
+.thought-body .md-body p,
+.msg.thought .msg-body,
+.msg.thought .md-body {
+  color: var(--muted);
+  font-size: 13px;
+  white-space: pre-wrap;
+  overflow: visible !important;
+  max-height: none !important;
+  text-overflow: unset;
+  display: block;
+  -webkit-line-clamp: unset;
+  line-clamp: unset;
+  word-break: break-word;
+}
+
+.msg.thought {
+  white-space: normal;
+  overflow: visible;
+  max-height: none;
+  text-overflow: unset;
+}
+
+.worked-line {
+  padding: 2px 16px 8px 36px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+}
