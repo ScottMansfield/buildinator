@@ -1,4 +1,4 @@
-import { accessOf, requireRole } from "./acl";
+import { accessOf, requireAccountWrite, requireRole } from "./acl";
 import {
   deleteAllShares,
   deleteSessionRow,
@@ -141,6 +141,20 @@ function usageTokens(update: AcpUpdate): { input?: number; output?: number } {
   };
 }
 
+
+function closeTurnThoughts(
+  t: Transcript,
+  thoughtIds: Map<string, string>,
+  now: string,
+): void {
+  for (const id of thoughtIds.values()) {
+    const msg = t.messages.find((m) => m.id === id);
+    if (msg && msg.role === "thought" && !msg.endedAt) {
+      msg.endedAt = now;
+    }
+  }
+}
+
 function throttleSave(sessionId: string, t: Transcript): () => void {
   let last = 0;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -273,6 +287,7 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
     const kind = update.sessionUpdate;
 
     if (kind === "agent_message_chunk") {
+      closeTurnThoughts(t, thoughtIds, now);
       const key = update.messageId || "default";
       let id = assistantIds.get(key);
       const chunk = acpText(update.content);
@@ -285,6 +300,7 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
         if (msg) msg.content += chunk;
       }
       const msg = t.messages.find((m) => m.id === id);
+      emit(sessionId, { type: "activity", phase: "writing" });
       emit(sessionId, { type: "message", id, role: "assistant", content: msg?.content ?? chunk });
       persist();
       return;
@@ -293,6 +309,11 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
     if (kind === "agent_thought_chunk") {
       const key = update.messageId || "default";
       let id = thoughtIds.get(key);
+      const existing = id ? t.messages.find((m) => m.id === id) : undefined;
+      if (existing?.endedAt) {
+        id = undefined;
+        thoughtIds.delete(key);
+      }
       const chunk = acpText(update.content);
       if (!id) {
         id = newId();
@@ -303,12 +324,14 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
         if (msg) msg.content += chunk;
       }
       const msg = t.messages.find((m) => m.id === id);
+      emit(sessionId, { type: "activity", phase: "thinking" });
       emit(sessionId, { type: "thought", id, content: msg?.content ?? chunk });
       persist();
       return;
     }
 
     if (kind === "tool_call" || kind === "tool_call_update") {
+      closeTurnThoughts(t, thoughtIds, now);
       const toolCallId = typeof update.toolCallId === "string" ? update.toolCallId : newId();
       const title = typeof update.title === "string" ? update.title : undefined;
       const existing = t.toolCalls.find((c) => c.id === toolCallId);
@@ -335,6 +358,7 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
       } else {
         t.toolCalls.push(tool);
       }
+      emit(sessionId, { type: "activity", phase: "working" });
       emit(sessionId, { type: "tool", tool: { ...tool, input: { ...tool.input } } });
       persist();
       return;
@@ -350,6 +374,7 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
         return `[${done ? "x" : " "}] ${content}`;
       }).filter(Boolean);
       if (lines.length === 0) return;
+      emit(sessionId, { type: "activity", phase: "working" });
       const content = lines.join("\n");
       const existing = t.artifacts.find((a) => a.kind === "plan" && a.title === "Plan");
       if (existing) {
@@ -515,11 +540,18 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
       if (!stillThisTurn()) return;
 
       const doneAt = new Date().toISOString();
-      updateSessionMeta(sessionId, { status: "idle", updatedAt: doneAt });
+      closeTurnThoughts(t, thoughtIds, doneAt);
+      const stillTools = t.toolCalls.some(
+        (c) => c.status === "pending" || c.status === "running",
+      );
+      updateSessionMeta(sessionId, {
+        status: stillTools ? "running" : "idle",
+        updatedAt: doneAt,
+      });
       const updated = getAccessibleSummary(user.id, sessionId);
       if (updated) touchInfo(t, updated);
       saveTranscript(sessionId, t);
-      emit(sessionId, { type: "status", status: "idle" });
+      emit(sessionId, { type: "status", status: stillTools ? "running" : "idle" });
       emit(sessionId, { type: "done", stopReason: result.stopReason });
     } catch (err) {
       if (cancelled()) {
@@ -558,6 +590,7 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
 
 
   async createProject(user: SessionUser, name: string): Promise<Project> {
+    requireAccountWrite(user.role);
     const trimmed = name.trim();
     if (!trimmed || trimmed.length > 40) {
       throw new AclError(400, "project name must be 1–40 characters");
@@ -607,6 +640,7 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
     projectId: string,
     title?: string,
   ): Promise<SessionDetail> {
+    requireAccountWrite(user.role);
     const project = getProjectRow(projectId);
     if (!project) throw new NotFoundError("unknown project");
     if (project.owner_id !== user.id) {
@@ -636,6 +670,7 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
     sessionId: string,
     title: string,
   ): Promise<SessionSummary> {
+    requireAccountWrite(user.role);
     const summary = getAccessibleSummary(user.id, sessionId);
     if (!summary) throw new NotFoundError("session not found");
     requireRole(summary.myRole, "write");
@@ -657,6 +692,7 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
     sessionId: string,
     prompt: string,
   ): Promise<SessionDetail> {
+    requireAccountWrite(user.role);
     const summary = getAccessibleSummary(user.id, sessionId);
     if (!summary) throw new NotFoundError("session not found");
     requireRole(summary.myRole, "write");
@@ -676,6 +712,7 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
     if (grokAcpEnabled()) {
       saveTranscript(sessionId, t);
       emit(sessionId, { type: "status", status: "running" });
+      emit(sessionId, { type: "activity", phase: "thinking" });
       const project = getProjectRow(summary.projectId);
       if (!project) throw new NotFoundError("unknown project");
       const cwd = ensureSandbox(project.owner_id, project.id);
@@ -781,6 +818,7 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
   }
 
   async forkSession(user: SessionUser, sessionId: string): Promise<SessionDetail> {
+    requireAccountWrite(user.role);
     const summary = getAccessibleSummary(user.id, sessionId);
     if (!summary) throw new NotFoundError("session not found");
     requireRole(summary.myRole, "write");
@@ -824,6 +862,7 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
   }
 
   async resumeSession(user: SessionUser, sessionId: string): Promise<SessionDetail> {
+    requireAccountWrite(user.role);
     const summary = getAccessibleSummary(user.id, sessionId);
     if (!summary) throw new NotFoundError("session not found");
     requireRole(summary.myRole, "write");
@@ -855,6 +894,7 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
   }
 
   async compactSession(user: SessionUser, sessionId: string): Promise<SessionDetail> {
+    requireAccountWrite(user.role);
     const summary = getAccessibleSummary(user.id, sessionId);
     if (!summary) throw new NotFoundError("session not found");
     requireRole(summary.myRole, "write");
@@ -885,6 +925,7 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
   }
 
   async rewindSession(user: SessionUser, sessionId: string): Promise<SessionDetail> {
+    requireAccountWrite(user.role);
     const summary = getAccessibleSummary(user.id, sessionId);
     if (!summary) throw new NotFoundError("session not found");
     requireRole(summary.myRole, "write");
@@ -917,6 +958,7 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
   }
 
   async cancelSession(user: SessionUser, sessionId: string): Promise<SessionDetail> {
+    requireAccountWrite(user.role);
     const summary = getAccessibleSummary(user.id, sessionId);
     if (!summary) throw new NotFoundError("session not found");
     requireRole(summary.myRole, "write");
@@ -943,6 +985,7 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
     username: string,
     role: ShareRole,
   ): Promise<SessionShare> {
+    requireAccountWrite(user.role);
     const summary = getAccessibleSummary(user.id, sessionId);
     if (!summary) throw new NotFoundError("session not found");
     requireRole(summary.myRole, "owner");
@@ -970,6 +1013,7 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
   }
 
   async listShares(user: SessionUser, sessionId: string): Promise<SessionShare[]> {
+    requireAccountWrite(user.role);
     const summary = getAccessibleSummary(user.id, sessionId);
     if (!summary) throw new NotFoundError("session not found");
     requireRole(summary.myRole, "owner");
@@ -981,6 +1025,7 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
     sessionId: string,
     shareId: string,
   ): Promise<void> {
+    requireAccountWrite(user.role);
     const summary = getAccessibleSummary(user.id, sessionId);
     if (!summary) throw new NotFoundError("session not found");
     requireRole(summary.myRole, "owner");
@@ -990,6 +1035,7 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
   }
 
   async revokeAllShares(user: SessionUser, sessionId: string): Promise<void> {
+    requireAccountWrite(user.role);
     const summary = getAccessibleSummary(user.id, sessionId);
     if (!summary) throw new NotFoundError("session not found");
     requireRole(summary.myRole, "owner");
@@ -997,6 +1043,7 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
   }
 
   async deleteSession(user: SessionUser, sessionId: string): Promise<void> {
+    requireAccountWrite(user.role);
     const row = getSessionRow(sessionId);
     if (!row) throw new NotFoundError("session not found");
     const have = accessOf(row.owner_id, user.id, shareRoleFor(sessionId, user.id));
@@ -1007,6 +1054,7 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
   }
 
   async destroySandbox(user: SessionUser, projectId: string): Promise<void> {
+    requireAccountWrite(user.role);
     const project = getProjectRow(projectId);
     if (!project) throw new NotFoundError("unknown project");
     if (project.owner_id !== user.id) {
