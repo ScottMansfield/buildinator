@@ -71,3 +71,28 @@ export function titleFromPrompt(prompt: string): string {
   const sp = cut.lastIndexOf(" ");
   return `${(sp > 24 ? cut.slice(0, sp) : cut).trim()}…`;
 }
+
+/** Chat elapsed durations: 4.2s, 12s, 7m 38s, 1h 2m. Never 458s. */
+export function formatElapsed(ms: number): string {
+  const n = Math.max(0, ms);
+  if (n < 10_000) return `${(n / 1000).toFixed(1)}s`;
+  const total = Math.round(n / 1000);
+  if (total < 60) return `${total}s`;
+  if (total < 3600) {
+    const m = Math.floor(total / 60);
+    const s = total % 60;
+    return `${m}m ${s}s`;
+  }
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  return `${h}h ${m}m`;
+}
+
+/** Last-event age: `updated 2s ago`, `updated 1m 30s ago`. */
+export function formatUpdatedAgo(ms: number): string {
+  const n = Math.max(0, ms);
+  const s = Math.round(n / 1000);
+  if (s <= 0) return "updated just now";
+  if (s < 60) return `updated ${s}s ago`;
+  return `updated ${formatElapsed(s * 1000)} ago`;
+}

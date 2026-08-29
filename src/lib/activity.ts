@@ -22,17 +22,7 @@ export const IDLE_ACTIVITY: SessionActivity = {
   lastEventAt: 0,
 };
 
-export function formatElapsed(ms: number): string {
-  const n = Math.max(0, ms);
-  if (n < 10_000) return `${(n / 1000).toFixed(1)}s`;
-  return `${Math.round(n / 1000)}s`;
-}
-
-export function formatUpdatedAgo(ms: number): string {
-  const s = Math.max(0, Math.round(ms / 1000));
-  if (s <= 0) return "updated just now";
-  return `updated ${s}s ago`;
-}
+export { formatElapsed, formatUpdatedAgo } from "./format";
 
 export function bumpActivity(
   prev: SessionActivity,
