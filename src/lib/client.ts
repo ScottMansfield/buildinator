@@ -6,7 +6,10 @@ export class ApiError extends Error {
   }
 }
 
-export async function api<T>(path: string, init?: RequestInit): Promise<T> {
+export async function apiResult<T>(
+  path: string,
+  init?: RequestInit,
+): Promise<{ status: number; data: T }> {
   const headers = new Headers(init?.headers);
   if (init?.body && !headers.has("content-type")) {
     headers.set("content-type", "application/json");
@@ -25,5 +28,10 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
         : res.statusText;
     throw new ApiError(res.status, message);
   }
-  return data as T;
+  return { status: res.status, data: data as T };
+}
+
+export async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const { data } = await apiResult<T>(path, init);
+  return data;
 }

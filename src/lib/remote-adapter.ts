@@ -38,6 +38,9 @@ export class RemoteGrokAdapter implements GrokBuildAdapter {
   listOwnedProjects(_user: SessionUser): Promise<Project[]> {
     return this.fail();
   }
+  createProject(_user: SessionUser, _name: string): Promise<Project> {
+    return this.fail();
+  }
   listSessions(_user: SessionUser, _projectId?: string): Promise<SessionSummary[]> {
     return this.fail();
   }

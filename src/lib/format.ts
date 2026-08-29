@@ -56,3 +56,18 @@ export function modelStatusLine(
 ): string {
   return `${prettyModel(model)} (${variant}) · ${approval}`;
 }
+
+export function isUntitled(title: string): boolean {
+  return !title.trim() || /^new session$/i.test(title.trim());
+}
+
+/** First-line title the way the TUI names an untitled session. */
+export function titleFromPrompt(prompt: string): string {
+  const line = prompt.split(/\r?\n/).map((s) => s.trim()).find(Boolean) ?? "";
+  const cleaned = line.replace(/^#+\s*/, "").replace(/\s+/g, " ").trim();
+  if (!cleaned) return "";
+  if (cleaned.length <= 48) return cleaned;
+  const cut = cleaned.slice(0, 48);
+  const sp = cut.lastIndexOf(" ");
+  return `${(sp > 24 ? cut.slice(0, sp) : cut).trim()}…`;
+}
