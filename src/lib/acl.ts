@@ -1,4 +1,4 @@
-import type { AccessRole, ShareRole } from "./types";
+import type { AccessRole, ShareRole, UserRole } from "./types";
 import { AclError } from "./errors";
 
 const RANK: Record<AccessRole, number> = { read: 1, write: 2, owner: 3 };
@@ -29,4 +29,29 @@ export function requireRole(
 
 export function can(have: AccessRole | null | undefined, need: AccessRole): boolean {
   return Boolean(have && RANK[have] >= RANK[need]);
+}
+
+export function parseUserRole(value: unknown): UserRole {
+  if (value === "admin" || value === "write" || value === "read") return value;
+  return "write";
+}
+
+export function canAccountWrite(role: UserRole | null | undefined): boolean {
+  return role === "admin" || role === "write";
+}
+
+export function isAdmin(role: UserRole | null | undefined): boolean {
+  return role === "admin";
+}
+
+export function requireAccountWrite(role: UserRole | null | undefined): void {
+  if (!canAccountWrite(role)) {
+    throw new AclError(403, "forbidden");
+  }
+}
+
+export function requireAdmin(role: UserRole | null | undefined): void {
+  if (!isAdmin(role)) {
+    throw new AclError(403, "forbidden");
+  }
 }

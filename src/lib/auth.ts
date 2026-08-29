@@ -1,11 +1,26 @@
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import { COOKIE_NAME, getJwtSecret } from "./auth-cookie";
+import { parseUserRole } from "./acl";
 import { findUserById, findUserByUsername } from "./db";
 import { verifyPassword } from "./passwords";
 import type { SessionUser } from "./types";
 
 export { COOKIE_NAME, COOKIE_MAX_AGE, getJwtSecret } from "./auth-cookie";
+
+function toSessionUser(row: {
+  id: string;
+  username: string;
+  role: string;
+  disabled: number;
+}): SessionUser | null {
+  if (row.disabled) return null;
+  return {
+    id: row.id,
+    username: row.username,
+    role: parseUserRole(row.role),
+  };
+}
 
 export async function authenticate(
   username: string,
@@ -14,7 +29,7 @@ export async function authenticate(
   const row = findUserByUsername(username);
   if (!row) return null;
   if (!verifyPassword(password, row.password_hash)) return null;
-  return { id: row.id, username: row.username };
+  return toSessionUser(row);
 }
 
 export async function signSession(user: SessionUser): Promise<string> {
@@ -32,17 +47,17 @@ export async function getSessionUser(): Promise<SessionUser | null> {
   try {
     const { payload } = await jwtVerify(token, getJwtSecret());
     const id = typeof payload.sub === "string" ? payload.sub : null;
+    if (!id) return null;
+    const byId = findUserById(id);
+    if (byId) return toSessionUser(byId);
     const username =
       typeof payload.username === "string" ? payload.username : null;
-    if (id && username) {
-      return { id, username };
+    if (username) {
+      const byName = findUserByUsername(username);
+      if (byName) return toSessionUser(byName);
     }
-    if (id) {
-      const byId = findUserById(id);
-      if (byId) return { id: byId.id, username: byId.username };
-      const byName = findUserByUsername(id);
-      if (byName) return { id: byName.id, username: byName.username };
-    }
+    const byNameAsId = findUserByUsername(id);
+    if (byNameAsId) return toSessionUser(byNameAsId);
     return null;
   } catch {
     return null;
