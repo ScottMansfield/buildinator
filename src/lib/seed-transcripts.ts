@@ -1,4 +1,4 @@
-import type { Artifact, ChatMessage, ToolCall } from "./types";
+import type { Artifact, ChatMessage, SessionDetail, ToolCall } from "./types";
 import {
   SESSION_AUTH,
   SESSION_FLY,
@@ -12,6 +12,7 @@ export type Transcript = {
   messages: ChatMessage[];
   toolCalls: ToolCall[];
   artifacts: Artifact[];
+  acpSessionId?: string;
 };
 
 function hoursAgo(hours: number): string {
@@ -23,19 +24,13 @@ export function cloneTranscript(t: Transcript): Transcript {
     messages: t.messages.map((m) => ({ ...m })),
     toolCalls: t.toolCalls.map((c) => ({ ...c, input: { ...c.input } })),
     artifacts: t.artifacts.map((a) => ({ ...a })),
+    acpSessionId: t.acpSessionId,
   };
 }
 
 export function emptyTranscript(sessionId: string, cwd: string, now: string): Transcript {
   return {
-    messages: [
-      {
-        id: `${sessionId}-sys`,
-        role: "system",
-        createdAt: now,
-        content: `Mock session in ${cwd}. /rename to set a title.`,
-      },
-    ],
+    messages: [],
     toolCalls: [],
     artifacts: [
       {
@@ -44,7 +39,8 @@ export function emptyTranscript(sessionId: string, cwd: string, now: string): Tr
         kind: "info",
         title: "Session info",
         createdAt: now,
-        content: `model: grok-4.6 (high)\ncwd: ${cwd}\ntokens: 0 in / 0 out\nstatus: idle`,
+        content: `model: grok-4.6 (high)\ncwd: ${cwd}
+tokens: 0 in / 0 out\nstatus: idle`,
       },
     ],
   };
