@@ -1,4 +1,4 @@
-import type { ChatMessage, SessionDetail, ToolCall } from "./types";
+import type { Artifact, ChatMessage, SessionDetail, ToolCall } from "./types";
 
 export function toolsInFlight(tools: ToolCall[]): boolean {
   return tools.some((t) => t.status === "pending" || t.status === "running");
@@ -84,6 +84,26 @@ function mergeTools(prev: ToolCall[], incoming: ToolCall[]): ToolCall[] {
   return out;
 }
 
+
+function mergeArtifacts(prev: Artifact[], incoming: Artifact[]): Artifact[] {
+  const prevFiles = prev.filter((a) => a.kind === "file");
+  const incomingFiles = incoming.filter((a) => a.kind === "file");
+  const othersIn = incoming.filter((a) => a.kind !== "file");
+  const othersPrev = prev.filter((a) => a.kind !== "file");
+  const others = othersIn.length >= othersPrev.length ? othersIn : othersPrev;
+
+  const byTitle = new Map<string, Artifact>();
+  for (const a of prevFiles) byTitle.set(a.title, a);
+  for (const a of incomingFiles) byTitle.set(a.title, a);
+  const files = [...byTitle.values()].sort((a, b) => {
+    const tb = Date.parse(b.createdAt) || 0;
+    const ta = Date.parse(a.createdAt) || 0;
+    if (tb !== ta) return tb - ta;
+    return a.title.localeCompare(b.title);
+  });
+  return [...others, ...files];
+}
+
 /** Merge a GET /api/sessions/:id snapshot into live SSE state without dropping in-flight chunks. */
 export function mergeStreamDetail(
   prev: SessionDetail | null,
@@ -92,8 +112,7 @@ export function mergeStreamDetail(
   if (!prev || prev.id !== incoming.id) return incoming;
   const messages = mergeMessages(prev.messages, incoming.messages);
   const toolCalls = mergeTools(prev.toolCalls, incoming.toolCalls);
-  const artifacts =
-    incoming.artifacts.length >= prev.artifacts.length ? incoming.artifacts : prev.artifacts;
+  const artifacts = mergeArtifacts(prev.artifacts, incoming.artifacts);
   let status = incoming.status;
   if (incoming.status === "error") status = "error";
   else if (

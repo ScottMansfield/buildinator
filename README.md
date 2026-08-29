@@ -78,7 +78,7 @@ If two people have the same session open, they share one grok ACP turn. The serv
 - Transcripts persist under `dataRoot()/transcripts/<sessionId>.json` (`./data/transcripts` locally, `$BUILDINATOR_ROOT/data/transcripts` when set). SQLite indexes sessions including `acp_session_id` so `session/load` can resume grok's on-disk session under `GROK_HOME` after restart.
 - Refresh keeps the ACP session; we session/load the stored id; we only session/new when grok has no such session, and then we rehydrate from the UI transcript.
 - Live activity (thinking / working / writing) is pinned at the tail of the transcript, just above the composer. Consecutive identical tool runs collapse to one row (latest status); a different name starts a new line.
-- Files grok writes in the project sandbox appear in the artifacts **files** list with download. Refresh keeps the selected session in localStorage.
+- Artifacts **files** list the project sandbox on disk (not transcript mining). Refresh survives bash writes. Download uses `?path=` jailed to that sandbox. Selected session stays in localStorage.
 
 ## Deploy (one VM)
 

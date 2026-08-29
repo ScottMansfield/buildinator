@@ -130,3 +130,86 @@ export function relativeSandboxPath(sandbox: string, candidate: string): string 
   if (!inside) return null;
   return path.relative(path.resolve(sandbox), inside).split(path.sep).join("/");
 }
+
+const SKIP_DIR_NAMES = new Set([
+  "deps",
+  "node_modules",
+  ".git",
+  ".hg",
+  ".svn",
+  ".bzr",
+  "dist",
+  ".next",
+  "coverage",
+  "__pycache__",
+  ".venv",
+  "venv",
+  ".tox",
+  ".cache",
+  "build",
+]);
+
+const SKIP_FILE_NAMES = new Set([".DS_Store", "Thumbs.db"]);
+
+const SANDBOX_FILE_CAP = 200;
+const SANDBOX_WALK_CAP = 5000;
+
+export type SandboxFileEntry = {
+  rel: string;
+  size: number;
+  mtimeMs: number;
+};
+
+/**
+ * Regular files under a project sandbox. Newest mtime first, capped.
+ * Does not follow directory symlinks. Skips deps/ and other junk dirs.
+ * Never walks outside `sandbox`.
+ */
+export function listSandboxFiles(sandbox: string): SandboxFileEntry[] {
+  const root = path.resolve(sandbox);
+  const out: SandboxFileEntry[] = [];
+  let visited = 0;
+
+  function walk(dir: string): void {
+    if (visited >= SANDBOX_WALK_CAP) return;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const ent of entries) {
+      if (visited >= SANDBOX_WALK_CAP) return;
+      if (SKIP_FILE_NAMES.has(ent.name)) continue;
+      const abs = path.join(dir, ent.name);
+      if (!pathInsideSandbox(root, abs) && abs !== root) continue;
+      let st: fs.Stats;
+      try {
+        st = fs.lstatSync(abs);
+      } catch {
+        continue;
+      }
+      if (st.isSymbolicLink()) continue;
+      if (st.isDirectory()) {
+        if (SKIP_DIR_NAMES.has(ent.name)) continue;
+        walk(abs);
+        continue;
+      }
+      if (!st.isFile()) continue;
+      const rel = path.relative(root, abs).split(path.sep).join("/");
+      if (!rel || rel.startsWith("..")) continue;
+      visited += 1;
+      out.push({ rel, size: st.size, mtimeMs: st.mtimeMs });
+    }
+  }
+
+  try {
+    const rootSt = fs.lstatSync(root);
+    if (!rootSt.isDirectory()) return [];
+  } catch {
+    return [];
+  }
+  walk(root);
+  out.sort((a, b) => b.mtimeMs - a.mtimeMs || a.rel.localeCompare(b.rel));
+  return out.slice(0, SANDBOX_FILE_CAP);
+}
