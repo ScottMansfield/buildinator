@@ -51,9 +51,10 @@ export async function GET(request: Request, ctx: Ctx) {
       const sendEvent = (event: SessionStreamEvent) => {
         sendRaw(`data: ${JSON.stringify(event)}\n\n`);
       };
+      sendRaw("retry: 2000\n\n");
+      sendRaw(": connected\n\n");
       unsub = subscribe(id, sendEvent);
       heartbeat = setInterval(() => sendRaw(": ping\n\n"), 15_000);
-      sendRaw(": connected\n\n");
       const onAbort = () => {
         closed = true;
         if (heartbeat) clearInterval(heartbeat);
@@ -75,10 +76,11 @@ export async function GET(request: Request, ctx: Ctx) {
 
   return new Response(stream, {
     headers: {
-      "Content-Type": "text/event-stream",
+      "Content-Type": "text/event-stream; charset=utf-8",
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
       "X-Accel-Buffering": "no",
+      "Content-Encoding": "identity",
     },
   });
 }

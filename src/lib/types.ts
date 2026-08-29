@@ -73,11 +73,15 @@ export interface SessionSummary {
   sharedBy?: string;
 }
 
+export type ActivityPhase = "thinking" | "working" | "writing";
+
 export interface ChatMessage {
   id: string;
   role: MessageRole;
   content: string;
   createdAt: string;
+  /** When a thought phase ended (ISO). Live thoughts omit this until the phase closes. */
+  endedAt?: string;
 }
 
 export interface ToolCall {
@@ -119,6 +123,7 @@ export type SessionStreamEvent =
   | { type: "thought"; id: string; content: string }
   | { type: "tool"; tool: ToolCall }
   | { type: "status"; status: SessionStatus }
+  | { type: "activity"; phase: ActivityPhase }
   | { type: "title"; title: string }
   | { type: "done"; stopReason?: string }
   | { type: "error"; message: string };
