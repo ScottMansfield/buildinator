@@ -4,11 +4,15 @@ import type { Artifact } from "@/lib/types";
 
 type Props = {
   artifacts: Artifact[];
+  sessionId?: string | null;
   collapsed: boolean;
   onToggle: () => void;
 };
 
-export function ArtifactsPane({ artifacts, collapsed, onToggle }: Props) {
+export function ArtifactsPane({ artifacts, sessionId, collapsed, onToggle }: Props) {
+  const files = artifacts.filter((a) => a.kind === "file");
+  const cards = artifacts.filter((a) => a.kind !== "file");
+
   if (collapsed) {
     return (
       <button
@@ -39,13 +43,34 @@ export function ArtifactsPane({ artifacts, collapsed, onToggle }: Props) {
         </button>
       </div>
       <div style={{ overflow: "auto", flex: 1 }}>
-        {artifacts.length === 0 ? (
-          <div className="empty">
-            No artifacts for this session yet. Tool outputs, diffs, plans, and
-            terminals land here.
-          </div>
-        ) : (
-          artifacts.map((a) => (
+        <section className="artifact-files" aria-label="Files">
+          <header className="artifact-files-head">files</header>
+          {files.length === 0 ? (
+            <div className="empty artifact-files-empty">No files written yet.</div>
+          ) : (
+            <ul className="file-list">
+              {files.map((a) => {
+                const href = sessionId
+                  ? `/api/sessions/${encodeURIComponent(sessionId)}/files?path=${encodeURIComponent(a.title)}`
+                  : undefined;
+                return (
+                  <li key={a.id} className="file-row">
+                    <span className="file-path" title={a.title}>
+                      {a.title}
+                    </span>
+                    {href ? (
+                      <a className="file-download" href={href} download>
+                        download
+                      </a>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+        {cards.length === 0 && files.length === 0 ? null : (
+          cards.map((a) => (
             <article key={a.id} className="artifact">
               <header>
                 {a.kind} · {a.title}

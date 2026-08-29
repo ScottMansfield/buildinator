@@ -110,3 +110,23 @@ export function destroySandbox(ownerId: string, projectId: string): string {
   fs.rmSync(dir, { recursive: true, force: true });
   return ensureSandbox(ownerId, projectId);
 }
+
+/** Absolute path if `candidate` resolves inside sandbox; otherwise null. */
+export function pathInsideSandbox(sandbox: string, candidate: string): string | null {
+  if (!candidate || typeof candidate !== "string") return null;
+  const root = path.resolve(sandbox);
+  const resolved = path.isAbsolute(candidate)
+    ? path.resolve(candidate)
+    : path.resolve(root, candidate);
+  const prefix = root.endsWith(path.sep) ? root : root + path.sep;
+  if (resolved !== root && !resolved.startsWith(prefix)) return null;
+  if (resolved === root) return null;
+  return resolved;
+}
+
+/** POSIX-style path relative to sandbox, or null if outside. */
+export function relativeSandboxPath(sandbox: string, candidate: string): string | null {
+  const inside = pathInsideSandbox(sandbox, candidate);
+  if (!inside) return null;
+  return path.relative(path.resolve(sandbox), inside).split(path.sep).join("/");
+}

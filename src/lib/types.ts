@@ -125,6 +125,7 @@ export type SessionStreamEvent =
   | { type: "status"; status: SessionStatus }
   | { type: "activity"; phase: ActivityPhase }
   | { type: "title"; title: string }
+  | { type: "artifact"; artifact: Artifact }
   | { type: "done"; stopReason?: string }
   | { type: "error"; message: string };
 
