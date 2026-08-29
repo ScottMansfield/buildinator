@@ -76,7 +76,7 @@ See `Dockerfile` / `docker-compose.yml` for a containerized variant. Compose sti
 
 - `RemoteGrokAdapter` / `grok agent serve` (loopback WebSocket).
 - Permission prompts (ACP auto-allows).
-- `/compact` and `/rewind` are stubs. Fork starts a new ACP session.
+- Fork starts a new ACP session. `/compact` and `/rewind` talk to grok (`_x.ai/compact_conversation`, `_x.ai/rewind/execute` conversation_only).
 - Google SSO.
 - `package-lock.json` is not in git yet; `npm install` from `package.json` is enough.
 
