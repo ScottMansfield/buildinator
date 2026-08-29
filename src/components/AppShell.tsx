@@ -1,13 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { api } from "@/lib/client";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { api, apiResult } from "@/lib/client";
 import { can } from "@/lib/acl";
 import { modelStatusLine } from "@/lib/format";
 import type {
   Project,
   SessionDetail,
   SessionShare,
+  SessionStreamEvent,
   SessionSummary,
   SessionUser,
   ShareRole,
@@ -28,6 +29,33 @@ const HELP = [
   "keys: j/k sessions · n new · [ ] artifacts · t theme · / composer",
 ].join("\n");
 
+
+function upsertStreamMessage(
+  prev: SessionDetail | null,
+  sid: string,
+  msg: { id: string; role: "assistant" | "thought"; content: string },
+): SessionDetail | null {
+  if (!prev || prev.id !== sid) return prev;
+  const idx = prev.messages.findIndex((m) => m.id === msg.id);
+  if (idx >= 0) {
+    const messages = prev.messages.slice();
+    messages[idx] = { ...messages[idx], content: msg.content };
+    return { ...prev, messages };
+  }
+  return {
+    ...prev,
+    messages: [
+      ...prev.messages,
+      {
+        id: msg.id,
+        role: msg.role,
+        content: msg.content,
+        createdAt: new Date().toISOString(),
+      },
+    ],
+  };
+}
+
 type Props = { user: SessionUser };
 
 export function AppShell({ user }: Props) {
@@ -41,6 +69,11 @@ export function AppShell({ user }: Props) {
   const [draft, setDraft] = useState("");
   const [collapsed, setCollapsed] = useState(false);
   const [sending, setSending] = useState(false);
+  const sendingRef = useRef(false);
+  const queueRef = useRef<string[]>([]);
+  const selectedRef = useRef<string | null>(null);
+  const sendPromptRef = useRef<(text: string, fromQueue?: boolean) => Promise<void>>(async () => {});
+  const onTurnEndedRef = useRef<(sid: string, reappend?: boolean) => void>(() => {});
   const [notice, setNotice] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
@@ -49,6 +82,7 @@ export function AppShell({ user }: Props) {
     () => projects.find((p) => p.id === detail?.projectId),
     [projects, detail],
   );
+  selectedRef.current = selectedId;
 
   const role = detail?.myRole ?? null;
 
@@ -71,6 +105,71 @@ export function AppShell({ user }: Props) {
   }, []);
 
   useEffect(() => {
+    if (!selectedId) return;
+    const sid = selectedId;
+    const es = new EventSource(`/api/sessions/${sid}/events`);
+    es.onmessage = (ev) => {
+      if (!ev.data) return;
+      let event: SessionStreamEvent;
+      try {
+        event = JSON.parse(ev.data) as SessionStreamEvent;
+      } catch {
+        return;
+      }
+      if (selectedRef.current !== sid) return;
+      if (event.type === "message") {
+        setDetail((prev) => upsertStreamMessage(prev, sid, event));
+      } else if (event.type === "thought") {
+        setDetail((prev) =>
+          upsertStreamMessage(prev, sid, { id: event.id, role: "thought", content: event.content }),
+        );
+      } else if (event.type === "tool") {
+        setDetail((prev) => {
+          if (!prev || prev.id !== sid) return prev;
+          const idx = prev.toolCalls.findIndex((t) => t.id === event.tool.id);
+          const toolCalls = prev.toolCalls.slice();
+          if (idx >= 0) toolCalls[idx] = event.tool;
+          else toolCalls.push(event.tool);
+          return { ...prev, toolCalls };
+        });
+      } else if (event.type === "status") {
+        setDetail((prev) => (prev && prev.id === sid ? { ...prev, status: event.status } : prev));
+      } else if (event.type === "title") {
+        setDetail((prev) => (prev && prev.id === sid ? { ...prev, title: event.title } : prev));
+        setSessions((list) =>
+          list.map((s) => (s.id === sid ? { ...s, title: event.title } : s)),
+        );
+      } else if (event.type === "done") {
+        void (async () => {
+          try {
+            await loadSession(sid);
+            await refreshLists();
+          } catch {
+            // keep live state if reconcile fails
+          }
+          if (sendingRef.current) onTurnEndedRef.current(sid, true);
+        })();
+      } else if (event.type === "error") {
+        setNotice(event.message);
+        setDetail((prev) => (prev && prev.id === sid ? { ...prev, status: "error" } : prev));
+        void (async () => {
+          try {
+            await loadSession(sid);
+            await refreshLists();
+          } catch {
+            // keep live state if reconcile fails
+          }
+          if (sendingRef.current) onTurnEndedRef.current(sid, true);
+        })();
+      }
+    };
+    return () => {
+      es.close();
+    };
+  }, [selectedId, loadSession, refreshLists]);
+
+
+  useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
@@ -88,6 +187,20 @@ export function AppShell({ user }: Props) {
       cancelled = true;
     };
   }, [refreshLists, loadSession]);
+
+  async function createProject(name: string) {
+    try {
+      const data = await api<{ project: Project }>("/api/projects", {
+        method: "POST",
+        body: JSON.stringify({ name }),
+      });
+      await refreshLists();
+      await createSession(data.project.id);
+      setNotice(`Created project ${data.project.name}`);
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "create project failed");
+    }
+  }
 
   async function createSession(projectId: string) {
     const data = await api<{ session: SessionDetail }>("/api/sessions", {
@@ -110,23 +223,111 @@ export function AppShell({ user }: Props) {
     setNotice(`Renamed to ${title}`);
   }
 
-  async function sendPrompt(text: string) {
-    if (!selectedId) return;
+  function appendLocal(sid: string, text: string, label: string) {
+    const now = new Date().toISOString();
+    setDetail((prev) => {
+      if (!prev || prev.id !== sid) return prev;
+      return {
+        ...prev,
+        status: "running",
+        messages: [
+          ...prev.messages,
+          { id: crypto.randomUUID(), role: "user", content: text, createdAt: now },
+          { id: crypto.randomUUID(), role: "action", content: label, createdAt: now },
+        ],
+      };
+    });
+  }
+
+  function drainQueue(sid: string, reappend = false) {
+    const leftover = [...queueRef.current];
+    if (reappend && leftover.length && selectedRef.current === sid) {
+      const now = new Date().toISOString();
+      setDetail((prev) => {
+        if (!prev || prev.id !== sid) return prev;
+        return {
+          ...prev,
+          messages: [
+            ...prev.messages,
+            ...leftover.flatMap((q) => [
+              { id: crypto.randomUUID(), role: "user" as const, content: q, createdAt: now },
+              { id: crypto.randomUUID(), role: "action" as const, content: "queued", createdAt: now },
+            ]),
+          ],
+        };
+      });
+    }
+    sendingRef.current = false;
+    setSending(false);
+    const next = queueRef.current.shift();
+    if (next) void sendPromptRef.current(next, true);
+    else setNotice(null);
+  }
+  onTurnEndedRef.current = (sid: string, reappend = false) => drainQueue(sid, reappend);
+
+  async function sendPrompt(text: string, fromQueue = false) {
+    const sid = selectedRef.current;
+    if (!sid) return;
+    if (sendingRef.current) {
+      queueRef.current.push(text);
+      appendLocal(sid, text, "queued");
+      setNotice(`queued (${queueRef.current.length})`);
+      return;
+    }
+    sendingRef.current = true;
     setSending(true);
-    setNotice(null);
+    if (!fromQueue) appendLocal(sid, text, "grok is running…");
+    else {
+      setDetail((prev) => {
+        if (!prev || prev.id !== sid) return prev;
+        const msgs = prev.messages.map((m) =>
+          m.role === "action" && m.content === "queued" && prev.messages[prev.messages.indexOf(m) - 1]?.content === text
+            ? { ...m, content: "grok is running…" }
+            : m,
+        );
+        return { ...prev, status: "running", messages: msgs };
+      });
+    }
+    setNotice(queueRef.current.length ? `grok running · ${queueRef.current.length} queued` : null);
+    let waitForStream = false;
     try {
-      const data = await api<{ session: SessionDetail }>(
-        `/api/sessions/${selectedId}/prompt`,
+      const { status, data } = await apiResult<{ session: SessionDetail }>(
+        `/api/sessions/${sid}/prompt`,
         { method: "POST", body: JSON.stringify({ prompt: text }) },
       );
-      setDetail(data.session);
+      if (status === 202) {
+        waitForStream = true;
+        await refreshLists();
+        return;
+      }
+      const leftover = queueRef.current;
+      const now = new Date().toISOString();
+      setDetail({
+        ...data.session,
+        messages: leftover.length
+          ? [
+              ...data.session.messages,
+              ...leftover.flatMap((q) => [
+                { id: crypto.randomUUID(), role: "user" as const, content: q, createdAt: now },
+                { id: crypto.randomUUID(), role: "action" as const, content: "queued", createdAt: now },
+              ]),
+            ]
+          : data.session.messages,
+      });
       await refreshLists();
     } catch (err) {
       setNotice(err instanceof Error ? err.message : "send failed");
     } finally {
-      setSending(false);
+      if (!waitForStream) {
+        sendingRef.current = false;
+        setSending(false);
+        const next = queueRef.current.shift();
+        if (next) void sendPrompt(next, true);
+        else setNotice(null);
+      }
     }
   }
+  sendPromptRef.current = sendPrompt;
 
   async function runAction(id: string, type: "fork" | "resume" | "compact" | "rewind") {
     const data = await api<{ session: SessionDetail }>(`/api/sessions/${id}/actions`, {
@@ -284,7 +485,14 @@ export function AppShell({ user }: Props) {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [sessions, selectedId, detail, owned, loadSession, toggleTheme]);
+  }, [
+    sessions,
+    selectedId,
+    detail,
+    owned,
+    loadSession,
+    toggleTheme,
+  ]);
 
   const shares: SessionShare[] = detail?.shares ?? [];
 
@@ -315,6 +523,7 @@ export function AppShell({ user }: Props) {
             selectedId={selectedId}
             onSelect={(id) => void loadSession(id)}
             onNew={(id) => void createSession(id)}
+            onNewProject={(name) => void createProject(name)}
             onRename={(id, title) => void rename(id, title)}
             onResume={(id) => void runAction(id, "resume")}
             onFork={(id) => void runAction(id, "fork")}
