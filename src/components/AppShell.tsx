@@ -27,6 +27,26 @@ import { useTheme } from "./ThemeProvider";
 import { SharePanel } from "./SharePanel";
 import { UsersPanel } from "./UsersPanel";
 
+const SELECTED_SESSION_KEY = "buildinator:selectedSession";
+
+function readStoredSelectedId(): string | null {
+  try {
+    const v = localStorage.getItem(SELECTED_SESSION_KEY);
+    return v && v.trim() ? v.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredSelectedId(id: string | null): void {
+  try {
+    if (id) localStorage.setItem(SELECTED_SESSION_KEY, id);
+    else localStorage.removeItem(SELECTED_SESSION_KEY);
+  } catch {
+    // private mode / quota
+  }
+}
+
 const HELP = [
   "/help — this list",
   "/rename <title> — rename the current session (write)",
@@ -112,6 +132,7 @@ export function AppShell({ user }: Props) {
     const data = await api<{ session: SessionDetail }>(`/api/sessions/${id}`);
     setDetail(data.session);
     setSelectedId(id);
+    writeStoredSelectedId(id);
     return data.session;
   }, []);
 
@@ -167,6 +188,20 @@ export function AppShell({ user }: Props) {
           applyActivity("idle");
         }
         setDetail((prev) => (prev && prev.id === sid ? { ...prev, status: event.status } : prev));
+      } else if (event.type === "artifact") {
+        setDetail((prev) => {
+          if (!prev || prev.id !== sid) return prev;
+          const a = event.artifact;
+          const idx = prev.artifacts.findIndex(
+            (x) =>
+              x.id === a.id ||
+              (x.kind === "file" && a.kind === "file" && x.title === a.title),
+          );
+          const artifacts = prev.artifacts.slice();
+          if (idx >= 0) artifacts[idx] = a;
+          else artifacts.push(a);
+          return { ...prev, artifacts };
+        });
       } else if (event.type === "title") {
         setDetail((prev) => (prev && prev.id === sid ? { ...prev, title: event.title } : prev));
         setSessions((list) =>
@@ -240,8 +275,10 @@ export function AppShell({ user }: Props) {
       try {
         const list = await refreshLists();
         if (cancelled) return;
-        const first = list[0];
-        if (first) await loadSession(first.id);
+        const stored = readStoredSelectedId();
+        const pick =
+          stored && list.some((s) => s.id === stored) ? stored : list[0]?.id;
+        if (pick) await loadSession(pick);
       } catch (err) {
         if (!cancelled) {
           setLoadError(err instanceof Error ? err.message : "load failed");
@@ -275,6 +312,7 @@ export function AppShell({ user }: Props) {
     await refreshLists();
     setDetail(data.session);
     setSelectedId(data.session.id);
+    writeStoredSelectedId(data.session.id);
     setNotice("Created session.");
   }
 
@@ -366,7 +404,28 @@ export function AppShell({ user }: Props) {
       );
       if (status === 202) {
         waitForStream = true;
+        const titled = data.session.title;
+        const statusNext = data.session.status;
+        setDetail((prev) =>
+          prev && prev.id === sid
+            ? { ...prev, title: titled || prev.title, status: statusNext || prev.status }
+            : prev,
+        );
+        setSessions((list) =>
+          list.map((row) =>
+            row.id === sid
+              ? { ...row, title: titled || row.title, status: statusNext || row.status }
+              : row,
+          ),
+        );
         await refreshLists();
+        // Prompt response is source of truth if list refresh is still stale.
+        if (titled) {
+          setDetail((prev) => (prev && prev.id === sid ? { ...prev, title: titled } : prev));
+          setSessions((list) =>
+            list.map((row) => (row.id === sid ? { ...row, title: titled } : row)),
+          );
+        }
         return;
       }
       const leftover = queueRef.current;
@@ -424,6 +483,7 @@ export function AppShell({ user }: Props) {
     await refreshLists();
     setDetail(data.session);
     setSelectedId(data.session.id);
+    writeStoredSelectedId(data.session.id);
     setNotice(
       type === "fork"
         ? `Forked as ${data.session.title}`
@@ -657,6 +717,7 @@ export function AppShell({ user }: Props) {
           />
           <ArtifactsPane
             artifacts={detail?.artifacts ?? []}
+            sessionId={detail?.id}
             collapsed={collapsed}
             onToggle={() => setCollapsed((c) => !c)}
           />
