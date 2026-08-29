@@ -96,3 +96,18 @@ export function formatUpdatedAgo(ms: number): string {
   if (s < 60) return `updated ${s}s ago`;
   return `updated ${formatElapsed(s * 1000)} ago`;
 }
+
+/** Human file size for artifact.content, e.g. `12 KB`. */
+export function formatBytes(bytes: number): string {
+  const n = Math.max(0, Math.round(Number(bytes) || 0));
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  if (n < 1024 * 1024 * 1024) {
+    const mb = n / (1024 * 1024);
+    const rounded = mb >= 10 ? Math.round(mb) : Math.round(mb * 10) / 10;
+    return `${rounded} MB`;
+  }
+  const gb = n / (1024 * 1024 * 1024);
+  const rounded = gb >= 10 ? Math.round(gb) : Math.round(gb * 10) / 10;
+  return `${rounded} GB`;
+}

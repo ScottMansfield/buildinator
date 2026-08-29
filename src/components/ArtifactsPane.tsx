@@ -46,7 +46,7 @@ export function ArtifactsPane({ artifacts, sessionId, collapsed, onToggle }: Pro
         <section className="artifact-files" aria-label="Files">
           <header className="artifact-files-head">files</header>
           {files.length === 0 ? (
-            <div className="empty artifact-files-empty">No files written yet.</div>
+            <div className="empty artifact-files-empty">No files in this project sandbox yet.</div>
           ) : (
             <ul className="file-list">
               {files.map((a) => {
