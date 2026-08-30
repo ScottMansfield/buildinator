@@ -151,6 +151,37 @@ function focusComposer() {
   if (el instanceof HTMLElement) el.focus({ preventScroll: true });
 }
 
+
+type SessionUi = {
+  draft: string;
+  queue: string[];
+  sending: boolean;
+  activity: SessionActivity;
+  findOpen: boolean;
+  findQuery: string;
+  notice: string | null;
+};
+
+function emptySessionUi(): SessionUi {
+  return {
+    draft: "",
+    queue: [],
+    sending: false,
+    activity: { ...IDLE_ACTIVITY },
+    findOpen: false,
+    findQuery: "",
+    notice: null,
+  };
+}
+
+function cloneSessionUi(s: SessionUi): SessionUi {
+  return {
+    ...s,
+    queue: s.queue.slice(),
+    activity: { ...s.activity },
+  };
+}
+
 type Props = { user: SessionUser };
 
 export function AppShell({ user }: Props) {
@@ -161,18 +192,56 @@ export function AppShell({ user }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [search, setSearch] = useState("");
-  const [draft, setDraft] = useState("");
   const [collapsed, setCollapsed] = useState(false);
-  const [sending, setSending] = useState(false);
-  const sendingRef = useRef(false);
-  const [activity, setActivity] = useState<SessionActivity>(IDLE_ACTIVITY);
-  const queueRef = useRef<string[]>([]);
-  const [queue, setQueue] = useState<string[]>([]);
-  const [findOpen, setFindOpen] = useState(false);
+  const [view, setView] = useState<SessionUi>(() => emptySessionUi());
+  const slotsRef = useRef(new Map<string, SessionUi>());
   const selectedRef = useRef<string | null>(null);
-  const sendPromptRef = useRef<(text: string, fromQueue?: boolean) => Promise<void>>(async () => {});
+  const sendPromptRef = useRef<(sid: string, text: string, fromQueue?: boolean) => Promise<void>>(
+    async () => {},
+  );
   const onTurnEndedRef = useRef<(sid: string, reappend?: boolean) => void>(() => {});
-  const [notice, setNotice] = useState<string | null>(null);
+
+  const draft = view.draft;
+  const sending = view.sending;
+  const queue = view.queue;
+  const activity = view.activity;
+  const findOpen = view.findOpen;
+  const findQuery = view.findQuery;
+  const notice = view.notice;
+
+  function getSlot(sid: string): SessionUi {
+    let s = slotsRef.current.get(sid);
+    if (!s) {
+      s = emptySessionUi();
+      slotsRef.current.set(sid, s);
+    }
+    return s;
+  }
+
+  function flushView(sid: string | null) {
+    if (!sid) {
+      setView(emptySessionUi());
+      return;
+    }
+    setView(cloneSessionUi(getSlot(sid)));
+  }
+
+  function mutateSlot(sid: string, fn: (s: SessionUi) => void) {
+    fn(getSlot(sid));
+    if (selectedRef.current === sid) flushView(sid);
+  }
+
+  function setNotice(msg: string | null) {
+    const sid = selectedRef.current;
+    if (!sid) {
+      setView((v) => ({ ...v, notice: msg }));
+      return;
+    }
+    mutateSlot(sid, (s) => {
+      s.notice = msg;
+    });
+  }
+
   const [loadError, setLoadError] = useState<string | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
   const [usersOpen, setUsersOpen] = useState(false);
@@ -205,14 +274,25 @@ export function AppShell({ user }: Props) {
     return s.sessions;
   }, []);
 
-  const loadSession = useCallback(async (id: string) => {
+  const loadSession = useCallback(async (id: string, opts?: { reconcile?: boolean }) => {
     selectedRef.current = id;
     setSelectedId(id);
     writeStoredSelectedId(id);
+    const slot = slotsRef.current.get(id) ?? emptySessionUi();
+    if (!slotsRef.current.has(id)) slotsRef.current.set(id, slot);
+    setView(cloneSessionUi(slot));
     requestAnimationFrame(() => focusComposer());
     const data = await api<{ session: SessionDetail }>(`/api/sessions/${id}`);
     if (selectedRef.current !== id) return data.session;
     setDetail(data.session);
+    const live = slotsRef.current.get(id) ?? slot;
+    const reconcile = opts?.reconcile !== false;
+    if (reconcile && live.sending && data.session.status !== "running") {
+      onTurnEndedRef.current(id, true);
+    } else if (!live.sending && data.session.status !== "running") {
+      live.activity = { ...IDLE_ACTIVITY };
+      if (selectedRef.current === id) setView(cloneSessionUi(live));
+    }
     requestAnimationFrame(() => focusComposer());
     return data.session;
   }, []);
@@ -225,7 +305,9 @@ export function AppShell({ user }: Props) {
     let retry = 0;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     const applyActivity = (phase: SessionActivity["phase"]) => {
-      setActivity((prev) => bumpActivity(prev, phase));
+      mutateSlot(sid, (s) => {
+        s.activity = bumpActivity(s.activity, phase);
+      });
     };
     const handleEvent = (ev: MessageEvent) => {
       if (!ev.data || ev.data === ": connected") return;
@@ -235,7 +317,6 @@ export function AppShell({ user }: Props) {
       } catch {
         return;
       }
-      if (selectedRef.current !== sid) return;
       if (event.type === "message") {
         applyActivity("writing");
         setDetail((prev) => {
@@ -262,12 +343,18 @@ export function AppShell({ user }: Props) {
         applyActivity(event.phase);
       } else if (event.type === "status") {
         if (event.status === "running") {
-          setActivity((prev) =>
-            prev.phase === "idle" ? bumpActivity(prev, "thinking") : { ...prev, lastEventAt: Date.now() },
-          );
+          mutateSlot(sid, (s) => {
+            s.activity =
+              s.activity.phase === "idle"
+                ? bumpActivity(s.activity, "thinking")
+                : { ...s.activity, lastEventAt: Date.now() };
+          });
         } else {
           applyActivity("idle");
         }
+        setSessions((list) =>
+          list.map((row) => (row.id === sid ? { ...row, status: event.status } : row)),
+        );
         setDetail((prev) => (prev && prev.id === sid ? { ...prev, status: event.status } : prev));
       } else if (event.type === "artifact") {
         setDetail((prev) => {
@@ -292,25 +379,27 @@ export function AppShell({ user }: Props) {
         applyActivity("idle");
         void (async () => {
           try {
-            await loadSession(sid);
+            if (selectedRef.current === sid) await loadSession(sid, { reconcile: false });
             await refreshLists();
           } catch {
             // keep live state if reconcile fails
           }
-          if (sendingRef.current) onTurnEndedRef.current(sid, true);
+          if (getSlot(sid).sending) onTurnEndedRef.current(sid, true);
         })();
       } else if (event.type === "error") {
         applyActivity("idle");
-        setNotice(event.message);
+        mutateSlot(sid, (s) => {
+          s.notice = event.message;
+        });
         setDetail((prev) => (prev && prev.id === sid ? { ...prev, status: "error" } : prev));
         void (async () => {
           try {
-            await loadSession(sid);
+            if (selectedRef.current === sid) await loadSession(sid, { reconcile: false });
             await refreshLists();
           } catch {
             // keep live state if reconcile fails
           }
-          if (sendingRef.current) onTurnEndedRef.current(sid, true);
+          if (getSlot(sid).sending) onTurnEndedRef.current(sid, true);
         })();
       }
     };
@@ -340,7 +429,6 @@ export function AppShell({ user }: Props) {
         retryTimer = setTimeout(connect, delay);
       };
     };
-    setActivity(IDLE_ACTIVITY);
     connect();
     return () => {
       closed = true;
@@ -391,9 +479,11 @@ export function AppShell({ user }: Props) {
       body: JSON.stringify({ projectId }),
     });
     await refreshLists();
+    selectedRef.current = data.session.id;
     setDetail(data.session);
     setSelectedId(data.session.id);
     writeStoredSelectedId(data.session.id);
+    flushView(data.session.id);
     setNotice("Created session.");
     requestAnimationFrame(() => focusComposer());
   }
@@ -424,9 +514,10 @@ export function AppShell({ user }: Props) {
     });
   }
 
-  function syncQueue(next: string[]) {
-    queueRef.current = next;
-    setQueue(next);
+  function syncQueue(sid: string, next: string[]) {
+    mutateSlot(sid, (s) => {
+      s.queue = next;
+    });
   }
 
   async function patchPrefs(prefs: { approval?: string; model?: string; variant?: string }) {
@@ -466,7 +557,7 @@ export function AppShell({ user }: Props) {
   }
 
   function drainQueue(sid: string, reappend = false) {
-    const leftover = [...queueRef.current];
+    const leftover = [...getSlot(sid).queue];
     if (reappend && leftover.length && selectedRef.current === sid) {
       const now = new Date().toISOString();
       setDetail((prev) => {
@@ -483,31 +574,37 @@ export function AppShell({ user }: Props) {
         };
       });
     }
-    sendingRef.current = false;
-    setSending(false);
-    const rest = queueRef.current.slice();
+    const rest = leftover.slice();
     const next = rest.shift();
-    syncQueue(rest);
-    if (next) void sendPromptRef.current(next, true);
-    else {
-      setActivity(IDLE_ACTIVITY);
-      setNotice(null);
-    }
+    mutateSlot(sid, (s) => {
+      s.sending = false;
+      s.queue = rest;
+      if (!next) {
+        s.activity = { ...IDLE_ACTIVITY };
+        s.notice = null;
+      }
+    });
+    if (next) void sendPromptRef.current(sid, next, true);
   }
   onTurnEndedRef.current = (sid: string, reappend = false) => drainQueue(sid, reappend);
 
-  async function sendPrompt(text: string, fromQueue = false) {
-    const sid = selectedRef.current;
+  async function sendPrompt(sid: string, text: string, fromQueue = false) {
     if (!sid) return;
-    if (sendingRef.current) {
-      syncQueue([...queueRef.current, text]);
+    const slot = getSlot(sid);
+    if (slot.sending) {
+      const queued = [...slot.queue, text];
+      mutateSlot(sid, (s) => {
+        s.queue = queued;
+        s.notice = `queued (${queued.length})`;
+      });
       appendLocal(sid, text, "queued");
-      setNotice(`queued (${queueRef.current.length})`);
       return;
     }
-    sendingRef.current = true;
-    setSending(true);
-    setActivity((prev) => bumpActivity(prev, "thinking"));
+    mutateSlot(sid, (s) => {
+      s.sending = true;
+      s.activity = bumpActivity(s.activity, "thinking");
+      s.notice = s.queue.length ? `grok running · ${s.queue.length} queued` : null;
+    });
     if (!fromQueue) appendLocal(sid, text, "grok is running…");
     else {
       setDetail((prev) => {
@@ -520,7 +617,6 @@ export function AppShell({ user }: Props) {
         return { ...prev, status: "running", messages: msgs };
       });
     }
-    setNotice(queueRef.current.length ? `grok running · ${queueRef.current.length} queued` : null);
     let waitForStream = false;
     try {
       const { status, data } = await apiResult<{ session: SessionDetail }>(
@@ -544,7 +640,6 @@ export function AppShell({ user }: Props) {
           ),
         );
         await refreshLists();
-        // Prompt response is source of truth if list refresh is still stale.
         if (titled) {
           setDetail((prev) => (prev && prev.id === sid ? { ...prev, title: titled } : prev));
           setSessions((list) =>
@@ -553,35 +648,31 @@ export function AppShell({ user }: Props) {
         }
         return;
       }
-      const leftover = queueRef.current;
+      const leftover = getSlot(sid).queue;
       const now = new Date().toISOString();
-      setDetail({
-        ...data.session,
-        messages: leftover.length
-          ? [
-              ...data.session.messages,
-              ...leftover.flatMap((q) => [
-                { id: crypto.randomUUID(), role: "user" as const, content: q, createdAt: now },
-                { id: crypto.randomUUID(), role: "action" as const, content: "queued", createdAt: now },
-              ]),
-            ]
-          : data.session.messages,
+      setDetail((prev) => {
+        if (prev && prev.id !== sid) return prev;
+        return {
+          ...data.session,
+          messages: leftover.length
+            ? [
+                ...data.session.messages,
+                ...leftover.flatMap((q) => [
+                  { id: crypto.randomUUID(), role: "user" as const, content: q, createdAt: now },
+                  { id: crypto.randomUUID(), role: "action" as const, content: "queued", createdAt: now },
+                ]),
+              ]
+            : data.session.messages,
+        };
       });
       await refreshLists();
     } catch (err) {
-      setNotice(err instanceof Error ? err.message : "send failed");
+      mutateSlot(sid, (s) => {
+        s.notice = err instanceof Error ? err.message : "send failed";
+      });
     } finally {
       if (!waitForStream) {
-        sendingRef.current = false;
-        setSending(false);
-        const rest = queueRef.current.slice();
-        const next = rest.shift();
-        syncQueue(rest);
-        if (next) void sendPrompt(next, true);
-        else {
-          setActivity(IDLE_ACTIVITY);
-          setNotice(null);
-        }
+        drainQueue(sid, false);
       }
     }
   }
@@ -608,9 +699,11 @@ export function AppShell({ user }: Props) {
       body: JSON.stringify({ type }),
     });
     await refreshLists();
+    selectedRef.current = data.session.id;
     setDetail(data.session);
     setSelectedId(data.session.id);
     writeStoredSelectedId(data.session.id);
+    flushView(data.session.id);
     setNotice(
       type === "fork"
         ? `Forked as ${data.session.title}`
@@ -624,6 +717,7 @@ export function AppShell({ user }: Props) {
 
   async function deleteSession(id: string) {
     await api(`/api/sessions/${id}`, { method: "DELETE" });
+    slotsRef.current.delete(id);
     const list = await refreshLists();
     if (selectedId === id) {
       const next = list[0];
@@ -631,6 +725,8 @@ export function AppShell({ user }: Props) {
       else {
         setDetail(null);
         setSelectedId(null);
+        selectedRef.current = null;
+        flushView(null);
       }
     }
     setNotice("Deleted session.");
@@ -667,13 +763,22 @@ export function AppShell({ user }: Props) {
   async function onCommand(text: string) {
     const trimmed = text.trim();
     if (!trimmed.startsWith("/")) {
-      setDraft("");
-      await sendPrompt(trimmed);
+      const sid = selectedRef.current;
+      if (sid) {
+        mutateSlot(sid, (s) => {
+          s.draft = "";
+        });
+        await sendPrompt(sid, trimmed);
+      }
       return;
     }
     const [cmd, ...rest] = trimmed.slice(1).split(/\s+/);
     const arg = rest.join(" ");
-    setDraft("");
+    if (selectedRef.current) {
+      mutateSlot(selectedRef.current, (s) => {
+        s.draft = "";
+      });
+    }
     switch (cmd) {
       case "help":
         setNotice(helpText(altMod));
@@ -696,7 +801,11 @@ export function AppShell({ user }: Props) {
         else await runAction(selectedId, "compact");
         break;
       case "find":
-        setFindOpen(true);
+        if (selectedRef.current) {
+          mutateSlot(selectedRef.current, (s) => {
+            s.findOpen = true;
+          });
+        }
         break;
       case "resume":
       case "fork":
@@ -721,7 +830,11 @@ export function AppShell({ user }: Props) {
       setNotice("Read-only: cannot run shell.");
       return;
     }
-    setDraft("");
+    if (selectedRef.current) {
+      mutateSlot(selectedRef.current, (s) => {
+        s.draft = "";
+      });
+    }
     try {
       const data = await api<{ session: SessionDetail }>(`/api/sessions/${selectedId}/shell`, {
         method: "POST",
@@ -829,7 +942,11 @@ export function AppShell({ user }: Props) {
         if (code === "KeyF") {
           e.preventDefault();
           e.stopPropagation();
-          setFindOpen(true);
+          if (selectedRef.current) {
+            mutateSlot(selectedRef.current, (s) => {
+              s.findOpen = true;
+            });
+          }
           return;
         }
       }
@@ -944,13 +1061,18 @@ export function AppShell({ user }: Props) {
             search={search}
             onSearch={setSearch}
             canWrite={accountWrite}
-            selectedTools={detail?.id === selectedId ? detail.toolCalls : []}
           />
           <ChatPane
             session={detail}
             project={selectedProject}
             draft={draft}
-            onDraft={setDraft}
+            onDraft={(v) => {
+              if (selectedRef.current) {
+                mutateSlot(selectedRef.current, (s) => {
+                  s.draft = v;
+                });
+              }
+            }}
             onSend={(t) => void onCommand(t)}
             onShell={(c) => void runShell(c)}
             onCancel={() => void cancelTurn()}
@@ -962,15 +1084,38 @@ export function AppShell({ user }: Props) {
             overlayOpen={shortcutsOpen}
             queue={queue}
             onDropQueued={(i) => {
-              const next = queueRef.current.filter((_, idx) => idx !== i);
-              syncQueue(next);
+              const sid = selectedRef.current;
+              if (!sid) return;
+              syncQueue(
+                sid,
+                getSlot(sid).queue.filter((_, idx) => idx !== i),
+              );
             }}
-            onClearQueue={() => syncQueue([])}
+            onClearQueue={() => {
+              const sid = selectedRef.current;
+              if (sid) syncQueue(sid, []);
+            }}
             findOpen={findOpen}
-            onFindOpen={setFindOpen}
+            findQuery={findQuery}
+            onFindQuery={(q) => {
+              if (selectedRef.current) {
+                mutateSlot(selectedRef.current, (s) => {
+                  s.findQuery = q;
+                });
+              }
+            }}
+            onFindOpen={(open) => {
+              if (selectedRef.current) {
+                mutateSlot(selectedRef.current, (s) => {
+                  s.findOpen = open;
+                  if (!open) s.findQuery = "";
+                });
+              }
+            }}
           />
           <ArtifactsPane
             artifacts={detail?.artifacts ?? []}
+            tools={detail?.id === selectedId ? detail.toolCalls : []}
             sessionId={detail?.id}
             collapsed={collapsed}
             onToggle={() => setCollapsed((c) => !c)}
