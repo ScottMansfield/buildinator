@@ -2,9 +2,11 @@
 
 A browser session manager for [Grok Build](https://github.com/xai-org/grok-build).
 
+Buildinator — the app, VM, ACP UI, and themes — was built with Grok Bot.
+
 Scott likes the TUI. This is that session manager in a browser: projects as sandboxes, a real chat transcript, artifacts on the right, and per-conversation sharing. Metadata lives in SQLite. Live grok talks ACP over stdio (`grok agent --always-approve stdio`). Thoughts, tokens, and tool cards stream into the pane. The HTTPS UI is the only internet-facing port; grok never binds a public socket.
 
-Default theme is Grok Night (charcoal, `>` prompts, teal identifiers). `t` flips to the older `web` theme.
+Four themes (localStorage `buildinator-theme`, default `tui`). **TUI:** groknight (`tui`) and grokday. **web:** dark (`web`) and light. `t` cycles; the header picker groups them. Stored `default` maps to web. Typing `/` in the composer lists `/help`, `/rename`, `/compact`, and `/rewind`.
 
 ## Run it
 
