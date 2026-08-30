@@ -17,6 +17,10 @@
    No arbitrary host path, no `..` traversal. Cross-project in-dev deps
    are explicit links to other registered projects, mounted at
    deps/<name>. Sharing is the grok session, not a host FS login.
+   Grok cwd is per session: projectsRoot()/<userId>/<projectId>/sessions/<sessionId>/.
+   Sessions are isolated unless an explicit project_links dep exists; they do
+   not see sibling sessions or the parent project workspace. Cross-project
+   deps still mount at deps/<name> inside the session sandbox.
 5. Deployable to one VM you can resize. Dockerfile / compose.
    Not Vercel-first.
 6. Hold Google SSO. Username/password stays.
@@ -27,6 +31,26 @@
    identifiers, model + variant bottom-right, path + context meter in
    the header, block cursor on the composer. Night is charcoal/teal;
    Day is light gray with blue commands and gold flags.
+
+Concurrent sessions (isolation leaks we closed):
+
+- UI queue, draft, sending, activity, find, and notice are keyed by
+  buildinator session id. Switching must not take the previous queue or
+  typed draft, mark the new session as sending, or drain the previous
+  queue. Background turns keep running; sidebar running dots stay; Esc
+  cancels only the visible session.
+- ACP `fs/read_text_file`, `fs/write_text_file`, and `terminal/create`
+  cwd are jailed to that session sandbox. Paths outside are JSON-RPC
+  errors. `deps/` may resolve to another linked project via the existing
+  symlink (that is the explicit link). This also stops an old ACP
+  session whose grok cwd is still the project root from reading sibling
+  session files.
+- One grok stdio child for every session. `session/prompt` is already
+  keyed by ACP session id; overlapping prompts multiplex. Do not spawn
+  one grok process per session and do not globally lock sending across
+  sessions.
+- `--always-approve` is process-wide (spawn flag). The UI picker can
+  stay and is stored per session; changing it does not respawn grok.
 
 /resume and /fork are **not** in-session slashes — they live on the
 session row because they deal with things outside the current session.
@@ -107,7 +131,7 @@ spawn; child tools are **not** reliably attributed to that task (Copilot even
 flattens subagent text into the parent stream). Local grok logs here did not
 show a grok-specific parent field we could trust.
 
-Buildinator nests in the sidebar **only** when `_meta.parentToolCallId`,
+Buildinator shows subagents in the right artifacts pane **only** when `_meta.parentToolCallId`,
 `_meta.claudeCode.parentToolUseId`, or `_meta["x.ai/tool"].parentToolCallId`
 is present. We never infer a tree from timing. `task` still renders as a
 spawn node with no children. `_x.ai/queue/interject` and
