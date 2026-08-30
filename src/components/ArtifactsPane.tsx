@@ -1,9 +1,12 @@
 "use client";
 
-import type { Artifact } from "@/lib/types";
+import type { Artifact, ToolCall } from "@/lib/types";
+import { isTaskSpawn } from "@/lib/acp-meta";
+import { selectSubagents, selectTasks, toolLabel } from "@/lib/tool-tree";
 
 type Props = {
   artifacts: Artifact[];
+  tools?: ToolCall[];
   sessionId?: string | null;
   collapsed: boolean;
   onToggle: () => void;
@@ -20,9 +23,41 @@ function cardHeading(kind: string, title: string): string {
   return `${k} · ${t}`;
 }
 
-export function ArtifactsPane({ artifacts, sessionId, collapsed, onToggle }: Props) {
+function statusDotClass(status: ToolCall["status"]): string {
+  if (status === "completed") return "done";
+  if (status === "running") return "running";
+  if (status === "pending") return "pending";
+  return "error";
+}
+
+function AgentNode({ tool, depth }: { tool: ToolCall; depth: number }) {
+  const spawn = isTaskSpawn(tool.name, tool.kind);
+  return (
+    <div
+      className={"agent-node" + (spawn ? " spawn" : "")}
+      style={{ paddingLeft: 10 + depth * 12 }}
+      title={tool.status}
+    >
+      <span
+        className={"status-dot " + statusDotClass(tool.status)}
+        aria-label={tool.status}
+      />
+      <span className="agent-label">{toolLabel(tool)}</span>
+    </div>
+  );
+}
+
+export function ArtifactsPane({
+  artifacts,
+  tools = [],
+  sessionId,
+  collapsed,
+  onToggle,
+}: Props) {
   const files = artifacts.filter((a) => a.kind === "file");
-  const cards = artifacts.filter((a) => a.kind !== "file");
+  const cards = artifacts.filter((a) => a.kind !== "file" && a.kind !== "plan");
+  const tasks = selectTasks(artifacts, tools);
+  const { roots: subagentRoots, children: subagentChildren } = selectSubagents(tools);
 
   if (collapsed) {
     return (
@@ -54,10 +89,40 @@ export function ArtifactsPane({ artifacts, sessionId, collapsed, onToggle }: Pro
         </button>
       </div>
       <div style={{ overflow: "auto", flex: 1 }}>
+        {tasks.length > 0 ? (
+          <section className="agents-tree" aria-label="Tasks">
+            <div className="agents-head">tasks</div>
+            {tasks.map((t) => (
+              <div key={t.id} className="agent-node" title={t.done ? "done" : "open"}>
+                <span
+                  className={"status-dot " + (t.done ? "done" : "pending")}
+                  aria-label={t.done ? "done" : "open"}
+                />
+                <span className="agent-label">
+                  {t.done ? "[x] " : "[ ] "}
+                  {t.text}
+                </span>
+              </div>
+            ))}
+          </section>
+        ) : null}
+        {subagentRoots.length > 0 ? (
+          <section className="agents-tree" aria-label="Subagents">
+            <div className="agents-head">subagents</div>
+            {subagentRoots.map((tool) => (
+              <div key={tool.id}>
+                <AgentNode tool={tool} depth={0} />
+                {(subagentChildren.get(tool.id) ?? []).map((child) => (
+                  <AgentNode key={child.id} tool={child} depth={1} />
+                ))}
+              </div>
+            ))}
+          </section>
+        ) : null}
         <section className="artifact-files" aria-label="Files">
           <header className="artifact-files-head">files</header>
           {files.length === 0 ? (
-            <div className="empty artifact-files-empty">No files in this project sandbox yet.</div>
+            <div className="empty artifact-files-empty">No files in this session sandbox yet.</div>
           ) : (
             <ul className="file-list">
               {files.map((a) => {
@@ -80,7 +145,7 @@ export function ArtifactsPane({ artifacts, sessionId, collapsed, onToggle }: Pro
             </ul>
           )}
         </section>
-        {cards.length === 0 && files.length === 0 ? null : (
+        {cards.length === 0 && files.length === 0 && tasks.length === 0 && subagentRoots.length === 0 ? null : (
           cards.map((a) => (
             <article key={a.id} className="artifact">
               <header>
