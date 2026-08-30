@@ -9,9 +9,10 @@ import {
   useState,
 } from "react";
 
-export type ThemeName = "tui" | "web";
+export type ThemeName = "tui" | "grokday" | "web" | "light";
 
 const KEY = "buildinator-theme";
+const THEMES: ThemeName[] = ["tui", "grokday", "web", "light"];
 
 type ThemeCtx = {
   theme: ThemeName;
@@ -21,6 +22,10 @@ type ThemeCtx = {
 
 const Ctx = createContext<ThemeCtx | null>(null);
 
+function isTheme(v: string | null): v is ThemeName {
+  return v === "tui" || v === "grokday" || v === "web" || v === "light";
+}
+
 function apply(theme: ThemeName) {
   document.documentElement.setAttribute("data-theme", theme);
 }
@@ -28,8 +33,8 @@ function apply(theme: ThemeName) {
 function readStored(): ThemeName {
   try {
     const stored = localStorage.getItem(KEY);
-    if (stored === "default" || stored === "web") return "web";
-    if (stored === "tui") return "tui";
+    if (stored === "default") return "web";
+    if (isTheme(stored)) return stored;
   } catch {
     // ignore
   }
@@ -52,7 +57,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const toggle = useCallback(() => {
-    setTheme(theme === "tui" ? "web" : "tui");
+    const i = THEMES.indexOf(theme);
+    setTheme(THEMES[(i + 1) % THEMES.length]);
   }, [setTheme, theme]);
 
   const value = useMemo(() => ({ theme, setTheme, toggle }), [theme, setTheme, toggle]);

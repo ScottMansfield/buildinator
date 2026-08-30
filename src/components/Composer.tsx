@@ -1,6 +1,35 @@
 "use client";
 
-import { FormEvent, KeyboardEvent, useRef } from "react";
+import {
+  FormEvent,
+  KeyboardEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+
+type SlashCmd = {
+  cmd: string;
+  hint: string;
+  send: boolean;
+  insert?: string;
+};
+
+const SLASH_COMMANDS: SlashCmd[] = [
+  { cmd: "/help", hint: "this list", send: true },
+  { cmd: "/rename", hint: "<title>", send: false, insert: "/rename " },
+  { cmd: "/compact", hint: "compact grok context", send: true },
+  { cmd: "/rewind", hint: "rewind last turn", send: true },
+];
+
+function matchingSlash(value: string): SlashCmd[] {
+  if (!value.startsWith("/") || value.includes("\n") || /\s/.test(value)) {
+    return [];
+  }
+  const token = value.toLowerCase();
+  return SLASH_COMMANDS.filter((c) => c.cmd.startsWith(token));
+}
 
 type Props = {
   value: string;
@@ -24,6 +53,23 @@ export function Composer({
   placeholder,
 }: Props) {
   const ref = useRef<HTMLTextAreaElement>(null);
+  const [dismissed, setDismissed] = useState(false);
+  const [selectedIdx, setSelectedIdx] = useState(0);
+  const matches = useMemo(() => matchingSlash(value), [value]);
+  const showPalette = matches.length > 0 && !dismissed && !disabled && !readOnly;
+  const selected = showPalette
+    ? Math.min(selectedIdx, matches.length - 1)
+    : 0;
+
+  useEffect(() => {
+    setSelectedIdx(0);
+  }, [value]);
+
+  useEffect(() => {
+    if (!value.startsWith("/") || value.includes("\n") || /\s/.test(value)) {
+      setDismissed(false);
+    }
+  }, [value]);
 
   function submit() {
     const text = value.trim();
@@ -31,13 +77,33 @@ export function Composer({
     onSend(text);
   }
 
+  function applySlash(item: SlashCmd) {
+    if (item.send) {
+      onSend(item.cmd);
+      return;
+    }
+    onChange(item.insert ?? item.cmd + " ");
+    setDismissed(true);
+    requestAnimationFrame(() => ref.current?.focus());
+  }
+
   function onSubmit(e: FormEvent) {
     e.preventDefault();
+    if (showPalette && matches[selected]) {
+      applySlash(matches[selected]);
+      return;
+    }
     submit();
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Escape") {
+      if (showPalette) {
+        e.preventDefault();
+        e.stopPropagation();
+        setDismissed(true);
+        return;
+      }
       if (running && onCancel) {
         e.preventDefault();
         e.stopPropagation();
@@ -45,8 +111,21 @@ export function Composer({
       }
       return;
     }
+    if (showPalette && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+      e.preventDefault();
+      const n = matches.length;
+      setSelectedIdx((i) => {
+        const cur = Math.min(i, n - 1);
+        return e.key === "ArrowDown" ? (cur + 1) % n : (cur - 1 + n) % n;
+      });
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
+      if (showPalette && matches[selected]) {
+        applySlash(matches[selected]);
+        return;
+      }
       submit();
     }
   }
@@ -64,6 +143,24 @@ export function Composer({
 
   return (
     <form className="composer" onSubmit={onSubmit}>
+      {showPalette ? (
+        <div className="slash-palette" role="listbox" aria-label="Slash commands">
+          {matches.map((item, i) => (
+            <button
+              key={item.cmd}
+              type="button"
+              role="option"
+              aria-selected={i === selected}
+              className={"slash-item" + (i === selected ? " selected" : "")}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => applySlash(item)}
+            >
+              <span className="slash-cmd">{item.cmd}</span>
+              <span className="slash-hint">{item.hint}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
       <div className="composer-line">
         <span className="composer-gt" aria-hidden>
           &gt;

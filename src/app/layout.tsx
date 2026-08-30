@@ -10,7 +10,7 @@ export const metadata: Metadata = {
   icons: { icon: "/favicon.svg" },
 };
 
-const themeBoot = `(function(){try{var t=localStorage.getItem("buildinator-theme");if(t==="default")t="web";if(t==="tui"||t==="web")document.documentElement.setAttribute("data-theme",t);else document.documentElement.setAttribute("data-theme","tui");}catch(e){document.documentElement.setAttribute("data-theme","tui");}})();`;
+const themeBoot = `(function(){try{var t=localStorage.getItem("buildinator-theme");if(t==="default")t="web";if(t==="tui"||t==="grokday"||t==="web"||t==="light")document.documentElement.setAttribute("data-theme",t);else document.documentElement.setAttribute("data-theme","tui");}catch(e){document.documentElement.setAttribute("data-theme","tui");}})();`;
 
 export default function RootLayout({
   children,
