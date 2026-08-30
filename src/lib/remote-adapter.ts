@@ -71,6 +71,13 @@ export class RemoteGrokAdapter implements GrokBuildAdapter {
   ): Promise<SessionSummary> {
     return this.fail();
   }
+  patchSession(
+    _user: SessionUser,
+    _sessionId: string,
+    _prefs: { title?: string; approval?: string; model?: string; variant?: string },
+  ): Promise<SessionSummary> {
+    return this.fail();
+  }
   forkSession(_user: SessionUser, _sessionId: string): Promise<SessionDetail> {
     return this.fail();
   }
