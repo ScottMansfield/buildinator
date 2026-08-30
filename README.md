@@ -64,7 +64,7 @@ Write users cannot create sessions inside someone else's project. Share is per c
 ## Sharing
 
 1. Sign in as the owner. Open a session. **share** → username + `read-only` or `read-write`.
-2. The other user sees it under **shared with me`.
+2. The other user sees it under **shared with me**.
 3. Read-only: live chat + artifacts, composer locked. Read-write: prompt, cancel in-flight turn, rename, compact, rewind. Owner-only: share, delete, destroy sandbox.
 
 If two people have the same session open, they share one grok ACP turn. The server fans `session/update` to every EventSource on that session. Sidebar-only is a snapshot until they click in.
