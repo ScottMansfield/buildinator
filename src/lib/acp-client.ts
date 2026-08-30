@@ -2,7 +2,6 @@ import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from "n
 import fs from "node:fs";
 import { grokPaths } from "./grok-cli";
 import { newId } from "./ids";
-import { jailSessionPath } from "./sandbox";
 import { sessionNewMeta } from "./session-prefs";
 
 export type AcpUpdate = {
@@ -152,8 +151,6 @@ class AcpClient {
   private promptWaiters = new Map<string, number>();
   /** ACP session ids loaded in THIS grok child since last spawn. */
   private loadedSessions = new Set<string>();
-  /** acpSessionId → session sandbox absolute path. */
-  private sessionSandboxes = new Map<string, string>();
   private fsWriteListeners = new Set<(absPath: string, bytes: number) => void>();
 
   onFsWrite(fn: (absPath: string, bytes: number) => void): () => void {
@@ -190,32 +187,63 @@ class AcpClient {
 
   private forgetLoaded(): void {
     this.loadedSessions.clear();
-    this.sessionSandboxes.clear();
   }
 
-  bindSandbox(acpId: string, sandbox: string): void {
-    if (acpId && sandbox) this.sessionSandboxes.set(acpId, sandbox);
-  }
-
-  private sandboxFor(params: unknown): string | null {
-    const sid =
-      params && typeof params === "object" && typeof (params as { sessionId?: unknown }).sessionId === "string"
-        ? (params as { sessionId: string }).sessionId.trim()
-        : "";
-    if (!sid) return null;
-    return this.sessionSandboxes.get(sid) ?? null;
-  }
-
-  private jailOrError(id: number | string, params: unknown, candidate: string, label: string): string | null {
-    const sandbox = this.sandboxFor(params);
-    if (!sandbox) {
-      this.respondError(id, -32000, "no sandbox for ACP session");
-      return null;
+  async ensureProcess(): Promise<void> {
+    if (this.child && this.initialized && this.child.exitCode === null && !this.child.killed) {
+      return;
     }
-    const jailed = jailSessionPath(sandbox, candidate);
-    if (!jailed) {
-      this.respondError(id, -32602, `${label} outside session sandbox`);
-      return null;
+    if (this.starting) return this.starting;
+    this.starting = this.boot();
+    try {
+      await this.starting;
+    } finally {
+      this.starting = null;
     }
-    return jailed;
+  }
+
+  private async boot(): Promise<void> {
+    this.teardown(new Error("ACP respawn"));
+    const { home, grokHome, bin, path } = grokPaths();
+    const child = spawn(bin, ["agent", "--always-approve", "stdio"], {
+      cwd: home,
+      env: {
+        ...process.env,
+        HOME: home,
+        GROK_HOME: grokHome,
+        PATH: path,
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    this.child = child;
+    this.buf = "";
+    this.initialized = false;
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => this.onStdout(chunk));
+    child.stderr.on("data", (chunk: string) => {
+      const text = String(chunk).trim();
+      if (text) console.error("[acp stderr]", text);
+    });
+    child.on("error", (err) => {
+      this.failAll(err);
+      this.initialized = false;
+      this.forgetLoaded();
+      this.child = null;
+    });
+    child.on("close", (code, signal) => {
+      this.failAll(new Error(`grok ACP exited (${code ?? signal ?? "unknown"})`));
+      this.initialized = false;
+      this.forgetLoaded();
+      if (this.child === child) this.child = null;
+    });
+    await this.request("initialize", {
+      protocolVersion: 1,
+      clientInfo: { name: "buildinator", version: "1.0.0" },
+      clientCapabilities: {
+        fs: { readTextFile: true, writeTextFile: true },
+        terminal: true,
+      },
+    });
+    this.initialized = true;
   }
