@@ -25,7 +25,7 @@ function shortcutGroups(mod: string): { label: string; items: Row[] }[] {
     {
       label: "Composer",
       items: [
-        { keys: "/", hint: "slash commands (/help /rename /compact /rewind)" },
+        { keys: "/", hint: "slash commands (/help /rename /compact /rewind /find)" },
         { keys: "↑ / ↓", hint: "prompt history" },
         { keys: "!", hint: "shell mode (empty composer)" },
       ],
@@ -36,6 +36,7 @@ function shortcutGroups(mod: string): { label: string; items: Row[] }[] {
         { keys: `${mod}+j / ${mod}+k`, hint: "next / previous session" },
         { keys: `${mod}+n`, hint: "new session" },
         { keys: `${mod}+t`, hint: "cycle theme" },
+        { keys: `${mod}+f`, hint: "find in transcript" },
       ],
     },
     {
