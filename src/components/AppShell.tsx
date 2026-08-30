@@ -640,6 +640,7 @@ export function AppShell({ user }: Props) {
           ),
         );
         await refreshLists();
+        // Prompt response is source of truth if list refresh is still stale.
         if (titled) {
           setDetail((prev) => (prev && prev.id === sid ? { ...prev, title: titled } : prev));
           setSessions((list) =>
