@@ -6,13 +6,79 @@ import { clockTime } from "@/lib/format";
 import { formatElapsed, type PhaseCrumb, type SessionActivity } from "@/lib/activity";
 import { MarkdownBody } from "./MarkdownBody";
 
-function RichText({ text }: { text: string }) {
+function splitHighlights(text: string, query: string): { text: string; hit: boolean }[] {
+  if (!query) return [{ text, hit: false }];
+  const q = query.toLowerCase();
+  const out: { text: string; hit: boolean }[] = [];
+  let rest = text;
+  while (rest) {
+    const i = rest.toLowerCase().indexOf(q);
+    if (i < 0) {
+      out.push({ text: rest, hit: false });
+      break;
+    }
+    if (i > 0) out.push({ text: rest.slice(0, i), hit: false });
+    out.push({ text: rest.slice(i, i + query.length), hit: true });
+    rest = rest.slice(i + query.length);
+  }
+  return out.length ? out : [{ text, hit: false }];
+}
+
+function Highlighted({
+  text,
+  query,
+  counter,
+  activeIndex,
+}: {
+  text: string;
+  query: string;
+  counter: { n: number };
+  activeIndex: number;
+}) {
+  if (!query) return <>{text}</>;
+  return (
+    <>
+      {splitHighlights(text, query).map((part, i) => {
+        if (!part.hit) return <span key={i}>{part.text}</span>;
+        const idx = counter.n;
+        counter.n += 1;
+        return (
+          <mark key={i} className={idx === activeIndex ? "find-hit active" : "find-hit"}>
+            {part.text}
+          </mark>
+        );
+      })}
+    </>
+  );
+}
+
+function RichText({
+  text,
+  query = "",
+  counter,
+  activeIndex = 0,
+}: {
+  text: string;
+  query?: string;
+  counter?: { n: number };
+  activeIndex?: number;
+}) {
   const parts = text.split(/(`[^`]+`)/g);
   return (
     <div className="msg-body">
       {parts.map((part, i) =>
         part.startsWith("`") && part.endsWith("`") ? (
-          <code key={i}>{part.slice(1, -1)}</code>
+          <code key={i}>
+            {counter && query ? (
+              <Highlighted text={part.slice(1, -1)} query={query} counter={counter} activeIndex={activeIndex} />
+            ) : (
+              part.slice(1, -1)
+            )}
+          </code>
+        ) : counter && query ? (
+          <span key={i}>
+            <Highlighted text={part} query={query} counter={counter} activeIndex={activeIndex} />
+          </span>
         ) : (
           <span key={i}>{part}</span>
         ),
@@ -67,11 +133,17 @@ function ThoughtMessage({
   live,
   now,
   fallbackEnd,
+  findQuery = "",
+  counter,
+  activeIndex = 0,
 }: {
   msg: ChatMessage;
   live: boolean;
   now: number;
   fallbackEnd?: number;
+  findQuery?: string;
+  counter?: { n: number };
+  activeIndex?: number;
 }) {
   const [open, setOpen] = useState(live);
   useEffect(() => {
@@ -96,7 +168,16 @@ function ThoughtMessage({
         <span>{label}</span>
       </summary>
       <div className="thought-body">
-        <MarkdownBody text={msg.content} />
+        {findQuery && counter ? (
+          <Highlighted
+            text={msg.content}
+            query={findQuery}
+            counter={counter}
+            activeIndex={activeIndex}
+          />
+        ) : (
+          <MarkdownBody text={msg.content} />
+        )}
       </div>
     </details>
   );
@@ -143,6 +224,8 @@ export function MessageList({
   now = Date.now(),
   crumbs = [],
   activity: _activity,
+  findQuery = "",
+  findIndex = 0,
 }: {
   messages: ChatMessage[];
   toolCalls: ToolCall[];
@@ -151,7 +234,10 @@ export function MessageList({
   now?: number;
   crumbs?: PhaseCrumb[];
   activity?: SessionActivity;
+  findQuery?: string;
+  findIndex?: number;
 }) {
+  const hitCounter = { n: 0 };
   const toolsByTime = [...toolCalls].sort((a, b) =>
     a.createdAt.localeCompare(b.createdAt),
   );
@@ -229,7 +315,16 @@ export function MessageList({
                 <span className="action-diamond" aria-hidden>
                   ◆
                 </span>
-                {item.msg.content}
+                {findQuery ? (
+                  <Highlighted
+                    text={item.msg.content}
+                    query={findQuery}
+                    counter={hitCounter}
+                    activeIndex={findIndex}
+                  />
+                ) : (
+                  item.msg.content
+                )}
               </div>
             );
           } else if (item.msg.role === "thought") {
@@ -247,6 +342,9 @@ export function MessageList({
                 live={live}
                 now={now}
                 fallbackEnd={nextAt}
+                findQuery={findQuery}
+                counter={hitCounter}
+                activeIndex={findIndex}
               />
             );
           } else {
@@ -258,13 +356,29 @@ export function MessageList({
                     <span className="msg-gt" aria-hidden>
                       &gt;
                     </span>
-                    <RichText text={item.msg.content} />
+                    <RichText
+                      text={item.msg.content}
+                      query={findQuery}
+                      counter={hitCounter}
+                      activeIndex={findIndex}
+                    />
                     <span className="msg-time">{clockTime(item.msg.createdAt)}</span>
                   </div>
                 ) : (
                   <>
                     <div className="msg-role">{item.msg.role}</div>
-                    <MarkdownBody text={item.msg.content} />
+                    {findQuery ? (
+                      <div className="msg-body">
+                        <Highlighted
+                          text={item.msg.content}
+                          query={findQuery}
+                          counter={hitCounter}
+                          activeIndex={findIndex}
+                        />
+                      </div>
+                    ) : (
+                      <MarkdownBody text={item.msg.content} />
+                    )}
                   </>
                 )}
               </article>
@@ -277,11 +391,31 @@ export function MessageList({
                 <span className="action-diamond" aria-hidden>
                   ◆
                 </span>
-                {toolActionLabel(item.tool)}
+                {findQuery ? (
+                  <Highlighted
+                    text={toolActionLabel(item.tool)}
+                    query={findQuery}
+                    counter={hitCounter}
+                    activeIndex={findIndex}
+                  />
+                ) : (
+                  toolActionLabel(item.tool)
+                )}
                 <span className={"badge " + item.tool.status}>{item.tool.status}</span>
               </div>
               {item.tool.output ? (
-                <div className="tool-output">{item.tool.output}</div>
+                <div className="tool-output">
+                  {findQuery ? (
+                    <Highlighted
+                      text={item.tool.output}
+                      query={findQuery}
+                      counter={hitCounter}
+                      activeIndex={findIndex}
+                    />
+                  ) : (
+                    item.tool.output
+                  )}
+                </div>
               ) : null}
             </div>
           );
