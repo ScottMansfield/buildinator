@@ -2,6 +2,7 @@ import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from "n
 import fs from "node:fs";
 import { grokPaths } from "./grok-cli";
 import { newId } from "./ids";
+import { jailSessionPath } from "./sandbox";
 import { sessionNewMeta } from "./session-prefs";
 
 export type AcpUpdate = {
@@ -151,6 +152,8 @@ class AcpClient {
   private promptWaiters = new Map<string, number>();
   /** ACP session ids loaded in THIS grok child since last spawn. */
   private loadedSessions = new Set<string>();
+  /** acpSessionId → session sandbox absolute path. */
+  private sessionSandboxes = new Map<string, string>();
   private fsWriteListeners = new Set<(absPath: string, bytes: number) => void>();
 
   onFsWrite(fn: (absPath: string, bytes: number) => void): () => void {
@@ -187,6 +190,34 @@ class AcpClient {
 
   private forgetLoaded(): void {
     this.loadedSessions.clear();
+    this.sessionSandboxes.clear();
+  }
+
+  bindSandbox(acpId: string, sandbox: string): void {
+    if (acpId && sandbox) this.sessionSandboxes.set(acpId, sandbox);
+  }
+
+  private sandboxFor(params: unknown): string | null {
+    const sid =
+      params && typeof params === "object" && typeof (params as { sessionId?: unknown }).sessionId === "string"
+        ? (params as { sessionId: string }).sessionId.trim()
+        : "";
+    if (!sid) return null;
+    return this.sessionSandboxes.get(sid) ?? null;
+  }
+
+  private jailOrError(id: number | string, params: unknown, candidate: string, label: string): string | null {
+    const sandbox = this.sandboxFor(params);
+    if (!sandbox) {
+      this.respondError(id, -32000, "no sandbox for ACP session");
+      return null;
+    }
+    const jailed = jailSessionPath(sandbox, candidate);
+    if (!jailed) {
+      this.respondError(id, -32602, `${label} outside session sandbox`);
+      return null;
+    }
+    return jailed;
   }
 
   async ensureProcess(): Promise<void> {
@@ -422,8 +453,10 @@ class AcpClient {
       this.respondError(id, -32602, "path required");
       return;
     }
+    const abs = this.jailOrError(id, params, p.path, "path");
+    if (!abs) return;
     try {
-      let content = fs.readFileSync(p.path, "utf8");
+      let content = fs.readFileSync(abs, "utf8");
       const line = typeof p.line === "number" ? p.line : undefined;
       const limit = typeof p.limit === "number" ? p.limit : undefined;
       if (line != null || limit != null) {
@@ -448,11 +481,13 @@ class AcpClient {
       this.respondError(id, -32602, "content required");
       return;
     }
+    const abs = this.jailOrError(id, params, p.path, "path");
+    if (!abs) return;
     try {
-      fs.writeFileSync(p.path, p.content, "utf8");
+      fs.writeFileSync(abs, p.content, "utf8");
       this.respond(id, {});
       const bytes = Buffer.byteLength(p.content, "utf8");
-      this.notifyFsWrite(p.path, bytes);
+      this.notifyFsWrite(abs, bytes);
     } catch (err) {
       this.respondError(id, -32000, err instanceof Error ? err.message : "write failed");
     }
@@ -465,7 +500,17 @@ class AcpClient {
       return;
     }
     const args = Array.isArray(p.args) ? p.args.map((a) => String(a)) : [];
-    const cwd = typeof p.cwd === "string" ? p.cwd : grokPaths().home;
+    const sandbox = this.sandboxFor(params);
+    if (!sandbox) {
+      this.respondError(id, -32000, "no sandbox for ACP session");
+      return;
+    }
+    const rawCwd = typeof p.cwd === "string" && p.cwd.trim() ? p.cwd : sandbox;
+    const cwd = jailSessionPath(sandbox, rawCwd);
+    if (!cwd) {
+      this.respondError(id, -32602, "cwd outside session sandbox");
+      return;
+    }
     const extraEnv: Record<string, string> = {};
     if (Array.isArray(p.env)) {
       for (const item of p.env) {
@@ -619,20 +664,25 @@ class AcpClient {
         : "";
     if (!sessionId) throw new Error("session/new missing sessionId");
     this.markLoaded(sessionId);
+    this.bindSandbox(sessionId, cwd);
     return sessionId;
   }
 
-  async sessionLoad(acpId: string): Promise<void> {
+  async sessionLoad(acpId: string, cwd?: string): Promise<void> {
     await this.ensureProcess();
+    if (cwd) this.bindSandbox(acpId, cwd);
     if (this.hasLoaded(acpId)) return;
     try {
       await this.request("session/load", { sessionId: acpId });
       this.markLoaded(acpId);
+      if (cwd) this.bindSandbox(acpId, cwd);
     } catch (err) {
       if (isAlreadyLoadedError(err)) {
         this.markLoaded(acpId);
+        if (cwd) this.bindSandbox(acpId, cwd);
         return;
       }
+      // Do not kill the grok child on a failed load.
       throw err;
     }
   }
@@ -675,6 +725,9 @@ class AcpClient {
     this.write({ jsonrpc: "2.0", method: "session/cancel", params: { sessionId: acpId } });
     const id = this.promptWaiters.get(acpId);
     if (id == null) return;
+    // Notification has no RPC reply. grok usually completes session/prompt with
+    // stopReason cancelled; if it ignores cancel, unstick the waiter so the
+    // next queued turn is not deadlocked. Do not kill the ACP child.
     setTimeout(() => {
       const p = this.pending.get(id);
       if (!p) return;
