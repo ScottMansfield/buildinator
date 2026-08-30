@@ -2,6 +2,7 @@ import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from "n
 import fs from "node:fs";
 import { grokPaths } from "./grok-cli";
 import { newId } from "./ids";
+import { sessionNewMeta } from "./session-prefs";
 
 export type AcpUpdate = {
   sessionUpdate: string;
@@ -604,12 +605,13 @@ class AcpClient {
     });
   }
 
-  async sessionNew(cwd: string): Promise<string> {
+  async sessionNew(cwd: string, approval = "always-approve"): Promise<string> {
     await this.ensureProcess();
+    const meta = sessionNewMeta(approval);
     const result = await this.request("session/new", {
       cwd,
       mcpServers: [],
-      _meta: { yoloMode: true },
+      ...(Object.keys(meta).length > 0 ? { _meta: meta } : {}),
     });
     const sessionId =
       result && typeof result === "object" && typeof (result as { sessionId?: unknown }).sessionId === "string"
@@ -683,6 +685,16 @@ class AcpClient {
       this.pending.delete(id);
       p.resolve({ stopReason: "cancelled" });
     }, 5000);
+  }
+
+  async sessionSetModel(sessionId: string, modelId: string): Promise<void> {
+    await this.ensureProcess();
+    await this.request("session/set_model", { sessionId, modelId });
+  }
+
+  async sessionSetMode(sessionId: string, modeId: string): Promise<void> {
+    await this.ensureProcess();
+    await this.request("session/set_mode", { sessionId, modeId });
   }
 
   async compactConversation(sessionId: string, context?: string): Promise<void> {
