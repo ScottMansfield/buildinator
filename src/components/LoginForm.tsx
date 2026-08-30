@@ -2,6 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import { ThemeToggle } from "./ThemeToggle";
+import { FontSizeToggle } from "./FontSizeToggle";
 
 export function LoginForm() {
   const [username, setUsername] = useState("scott");
@@ -37,8 +38,9 @@ export function LoginForm() {
   return (
     <div className="login-wrap">
       <form className="login-card" onSubmit={onSubmit}>
-        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
           <ThemeToggle />
+          <FontSizeToggle />
         </div>
         <h1>buildinator</h1>
         <p>Manage Grok Build sessions from the browser.</p>
