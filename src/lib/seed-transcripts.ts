@@ -101,6 +101,25 @@ export function seedTranscripts(): Map<string, Transcript> {
     ],
     toolCalls: [
       {
+        id: "t-task",
+        name: "task",
+        kind: "task",
+        status: "completed",
+        createdAt: hoursAgo(29.88),
+        input: { prompt: "map how grok persists sessions" },
+        output: "subagent finished",
+      },
+      {
+        id: "t-task-read",
+        name: "read_file",
+        kind: "read",
+        parentId: "t-task",
+        status: "completed",
+        createdAt: hoursAgo(29.86),
+        input: { path: "src/lib/db.ts" },
+        output: "sessions table + acp_session_id",
+      },
+      {
         id: "t1",
         name: "glob_search",
         status: "completed",
@@ -236,6 +255,24 @@ export function seedTranscripts(): Map<string, Transcript> {
       },
     ],
     toolCalls: [
+      {
+        id: "tt-task",
+        name: "task",
+        kind: "task",
+        status: "running",
+        createdAt: hoursAgo(0.06),
+        input: { prompt: "style the TUI chrome" },
+      },
+      {
+        id: "tt-task-read",
+        name: "read_file",
+        kind: "read",
+        parentId: "tt-task",
+        status: "completed",
+        createdAt: hoursAgo(0.055),
+        input: { path: "src/components/ThemeProvider.tsx" },
+        output: "data-theme + localStorage",
+      },
       {
         id: "tt1",
         name: "edit_file",
