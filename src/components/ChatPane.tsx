@@ -29,6 +29,11 @@ type Props = {
   onShare?: () => void;
   activity: SessionActivity;
   overlayOpen?: boolean;
+  queue?: string[];
+  onDropQueued?: (index: number) => void;
+  onClearQueue?: () => void;
+  findOpen?: boolean;
+  onFindOpen?: (open: boolean) => void;
 };
 
 function lastUserMessageId(session: SessionDetail | null): string | null {
@@ -53,6 +58,11 @@ export function ChatPane({
   onShare,
   activity,
   overlayOpen,
+  queue = [],
+  onDropQueued,
+  onClearQueue,
+  findOpen = false,
+  onFindOpen,
 }: Props) {
   const readOnly = role === "read";
   const resolved = resolveActivity(session, sending, activity);
@@ -67,6 +77,37 @@ export function ChatPane({
   const prevStartRef = useRef(resolved.phaseStartedAt);
   const crumbKeyRef = useRef("");
   const lastUserId = lastUserMessageId(session);
+  const [outputOnly, setOutputOnly] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [findIndex, setFindIndex] = useState(0);
+
+  useEffect(() => {
+    try {
+      setOutputOnly(localStorage.getItem("buildinator-output-only") === "1");
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  function toggleOutputOnly() {
+    setOutputOnly((v) => {
+      const next = !v;
+      try {
+        localStorage.setItem("buildinator-output-only", next ? "1" : "0");
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }
+
+  useEffect(() => {
+    if (!findOpen) return;
+    const el = document.getElementById("find-query");
+    if (el instanceof HTMLInputElement) {
+      requestAnimationFrame(() => el.focus());
+    }
+  }, [findOpen]);
 
   useEffect(() => {
     setCrumbs([]);
@@ -130,6 +171,17 @@ export function ChatPane({
           {session ? `main ${cwd}` : "no session"}
         </span>
         {session ? (
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={toggleOutputOnly}
+            aria-pressed={outputOnly}
+            title={outputOnly ? "Showing user + assistant output only" : "Showing all transcript lines"}
+          >
+            {outputOnly ? "output only" : "all messages"}
+          </button>
+        ) : null}
+        {session ? (
           <span className={"activity-chip " + chipClass} title={updated ?? undefined}>
             {chipLabel}
             {updated ? <span className="activity-updated">{updated}</span> : null}
@@ -159,14 +211,43 @@ export function ChatPane({
       ) : null}
       {session ? (
         <>
+          {findOpen ? (
+            <FindBar
+              query={findQuery}
+              onQuery={(q) => {
+                setFindQuery(q);
+                setFindIndex(0);
+              }}
+              matchIndex={findIndex}
+              onMatchIndex={setFindIndex}
+              messages={session.messages}
+              toolCalls={outputOnly ? [] : session.toolCalls}
+              includeTools={!outputOnly}
+              onClose={() => {
+                onFindOpen?.(false);
+                setFindQuery("");
+                setFindIndex(0);
+                requestAnimationFrame(() => {
+                  const el = document.getElementById("composer");
+                  if (el instanceof HTMLElement) el.focus({ preventScroll: true });
+                });
+              }}
+            />
+          ) : null}
           <MessageList
-            messages={session.messages}
-            toolCalls={session.toolCalls}
+            messages={
+              outputOnly
+                ? session.messages.filter((m) => m.role === "user" || m.role === "assistant")
+                : session.messages
+            }
+            toolCalls={outputOnly ? [] : session.toolCalls}
             inFlight={running || sending || toolsInFlight(session.toolCalls)}
             liveThoughtId={liveThought}
             now={now}
-            crumbs={crumbs}
+            crumbs={outputOnly ? [] : crumbs}
             activity={activity}
+            findQuery={findOpen ? findQuery : ""}
+            findIndex={findIndex}
           />
           <div className={"live-status " + chipClass} role="status" aria-live="polite">
             <span className="action-diamond" aria-hidden>
@@ -179,6 +260,33 @@ export function ChatPane({
       ) : (
         <div className="empty">Select a session or create one from the left.</div>
       )}
+      {queue.length > 0 ? (
+        <div className="prompt-queue" aria-label="Queued prompts">
+          <div className="prompt-queue-head">
+            queued {queue.length}
+            {onClearQueue ? (
+              <button type="button" className="btn-quiet" onClick={onClearQueue}>
+                clear
+              </button>
+            ) : null}
+          </div>
+          {queue.map((item, i) => (
+            <div key={`${i}-${item.slice(0, 24)}`} className="prompt-queue-item">
+              <span className="prompt-queue-text">{item}</span>
+              {onDropQueued ? (
+                <button
+                  type="button"
+                  className="btn-quiet"
+                  aria-label="Drop queued prompt"
+                  onClick={() => onDropQueued(i)}
+                >
+                  drop
+                </button>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
       <Composer
         value={draft}
         onChange={onDraft}
@@ -193,5 +301,96 @@ export function ChatPane({
         overlayOpen={overlayOpen}
       />
     </section>
+  );
+}
+
+
+function countMatches(hay: string, needle: string): number {
+  if (!needle) return 0;
+  const q = needle.toLowerCase();
+  const h = hay.toLowerCase();
+  let n = 0;
+  let from = 0;
+  while (from <= h.length) {
+    const i = h.indexOf(q, from);
+    if (i < 0) break;
+    n += 1;
+    from = i + Math.max(q.length, 1);
+  }
+  return n;
+}
+
+function FindBar({
+  query,
+  onQuery,
+  matchIndex,
+  onMatchIndex,
+  messages,
+  toolCalls,
+  includeTools,
+  onClose,
+}: {
+  query: string;
+  onQuery: (q: string) => void;
+  matchIndex: number;
+  onMatchIndex: (n: number) => void;
+  messages: SessionDetail["messages"];
+  toolCalls: SessionDetail["toolCalls"];
+  includeTools: boolean;
+  onClose: () => void;
+}) {
+  const total =
+    messages.reduce((n, m) => n + countMatches(m.content, query), 0) +
+    (includeTools
+      ? toolCalls.reduce(
+          (n, t) => n + countMatches(`${t.name} ${t.output ?? ""}`, query),
+          0,
+        )
+      : 0);
+  const idx = total === 0 ? 0 : ((matchIndex % total) + total) % total;
+
+  function next(dir: number) {
+    if (total === 0) return;
+    onMatchIndex(idx + dir);
+  }
+
+  return (
+    <div className="find-bar">
+      <label className="sr-only" htmlFor="find-query">
+        Find in transcript
+      </label>
+      <input
+        id="find-query"
+        className="input"
+        value={query}
+        placeholder="find in transcript"
+        autoComplete="off"
+        onChange={(e) => onQuery(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            e.stopPropagation();
+            onClose();
+            return;
+          }
+          if (e.key === "Enter") {
+            e.preventDefault();
+            next(e.shiftKey ? -1 : 1);
+          }
+        }}
+      />
+      <span className="find-count">
+        {query ? (total ? `${idx + 1}/${total}` : "0/0") : ""}
+      </span>
+      <button type="button" className="btn btn-ghost" onClick={() => next(-1)} disabled={!total}>
+        prev
+      </button>
+      <button type="button" className="btn btn-ghost" onClick={() => next(1)} disabled={!total}>
+        next
+      </button>
+      <button type="button" className="btn btn-ghost" onClick={onClose}>
+        close
+      </button>
+    </div>
   );
 }
