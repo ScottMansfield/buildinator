@@ -80,15 +80,58 @@ export function ensureSandbox(ownerId: string, projectId: string): string {
   return dir;
 }
 
-export function linkDep(
-  hostOwnerId: string,
-  hostProjectId: string,
+export type ProjectLinkTarget = {
+  name: string;
+  targetOwnerId: string;
+  targetProjectId: string;
+};
+
+let projectLinkLister: ((projectId: string) => ProjectLinkTarget[]) | undefined;
+
+/** db.ts registers this so session sandboxes can apply project_links without a cycle. */
+export function setProjectLinkLister(fn: (projectId: string) => ProjectLinkTarget[]): void {
+  projectLinkLister = fn;
+}
+
+export function sessionSandboxPath(ownerId: string, projectId: string, sessionId: string): string {
+  assertSafeSegment(ownerId, "userId");
+  assertSafeSegment(projectId, "projectId");
+  assertSafeSegment(sessionId, "sessionId");
+  const root = path.resolve(sandboxRoot());
+  const dir = path.resolve(root, ownerId, projectId, "sessions", sessionId);
+  const prefix = root.endsWith(path.sep) ? root : root + path.sep;
+  if (dir !== root && !dir.startsWith(prefix)) {
+    throw new Error("sandbox path escape");
+  }
+  return dir;
+}
+
+/**
+ * Per-session grok cwd. Isolated from sibling sessions and the parent project
+ * workspace unless an explicit project_links dep is mounted at deps/<name>.
+ */
+export function ensureSessionSandbox(ownerId: string, projectId: string, sessionId: string): string {
+  const dir = sessionSandboxPath(ownerId, projectId, sessionId);
+  fs.mkdirSync(path.join(dir, "deps"), { recursive: true });
+  const links = projectLinkLister?.(projectId) ?? [];
+  for (const link of links) {
+    try {
+      linkDepInto(dir, link.name, link.targetOwnerId, link.targetProjectId);
+    } catch {
+      // skip a bad/missing link; session dir still usable
+    }
+  }
+  return dir;
+}
+
+export function linkDepInto(
+  hostDir: string,
   name: string,
   targetOwnerId: string,
   targetProjectId: string,
 ): void {
   assertSafeSegment(name, "dep name");
-  const host = ensureSandbox(hostOwnerId, hostProjectId);
+  const host = path.resolve(hostDir);
   const target = ensureSandbox(targetOwnerId, targetProjectId);
   const dest = path.join(host, "deps", name);
   const destResolved = path.resolve(dest);
@@ -105,23 +148,59 @@ export function linkDep(
   fs.symlinkSync(path.relative(path.dirname(dest), target), dest);
 }
 
+export function linkDep(
+  hostOwnerId: string,
+  hostProjectId: string,
+  name: string,
+  targetOwnerId: string,
+  targetProjectId: string,
+): void {
+  const host = ensureSandbox(hostOwnerId, hostProjectId);
+  linkDepInto(host, name, targetOwnerId, targetProjectId);
+}
+
 export function destroySandbox(ownerId: string, projectId: string): string {
   const dir = sandboxPath(ownerId, projectId);
   fs.rmSync(dir, { recursive: true, force: true });
   return ensureSandbox(ownerId, projectId);
 }
 
-/** Absolute path if `candidate` resolves inside sandbox; otherwise null. */
-export function pathInsideSandbox(sandbox: string, candidate: string): string | null {
+function resolvedUnderRoot(root: string, candidate: string, allowRoot: boolean): string | null {
   if (!candidate || typeof candidate !== "string") return null;
-  const root = path.resolve(sandbox);
+  const base = path.resolve(root);
   const resolved = path.isAbsolute(candidate)
     ? path.resolve(candidate)
-    : path.resolve(root, candidate);
-  const prefix = root.endsWith(path.sep) ? root : root + path.sep;
-  if (resolved !== root && !resolved.startsWith(prefix)) return null;
-  if (resolved === root) return null;
+    : path.resolve(base, candidate);
+  const prefix = base.endsWith(path.sep) ? base : base + path.sep;
+  if (resolved === base) return allowRoot ? resolved : null;
+  if (!resolved.startsWith(prefix)) return null;
   return resolved;
+}
+
+/** Absolute path if `candidate` resolves inside sandbox; otherwise null. */
+export function pathInsideSandbox(sandbox: string, candidate: string): string | null {
+  return resolvedUnderRoot(sandbox, candidate, false);
+}
+
+/**
+ * Jail an ACP fs/terminal path to a session sandbox.
+ * Logical path must be under the sandbox (root allowed).
+ * realpath may land in another project only via deps/<name> (explicit project_links).
+ */
+export function jailSessionPath(sandbox: string, candidate: string): string | null {
+  const logical = resolvedUnderRoot(sandbox, candidate, true);
+  if (!logical) return null;
+  const root = path.resolve(sandbox);
+  const rel = path.relative(root, logical).split(path.sep).join("/");
+  const viaDeps = rel === "deps" || rel.startsWith("deps/");
+  try {
+    const real = fs.realpathSync(logical);
+    if (resolvedUnderRoot(sandbox, real, true)) return real;
+    if (viaDeps) return real;
+    return null;
+  } catch {
+    return logical;
+  }
 }
 
 /** POSIX-style path relative to sandbox, or null if outside. */
@@ -161,7 +240,7 @@ export type SandboxFileEntry = {
 };
 
 /**
- * Regular files under a project sandbox. Newest mtime first, capped.
+ * Regular files under a sandbox (session dir). Newest mtime first, capped.
  * Does not follow directory symlinks. Skips deps/ and other junk dirs.
  * Never walks outside `sandbox`.
  */
