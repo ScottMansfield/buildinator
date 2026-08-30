@@ -5,6 +5,16 @@ import {
   authenticate,
   signSession,
 } from "@/lib/auth";
+import {
+  attemptKey,
+  clientIp,
+  delayFailedLogin,
+  delayLockout,
+  isLockedOut,
+  recordFailure,
+  resetFailures,
+  tooManyResponse,
+} from "@/lib/login-guard";
 
 export const runtime = "nodejs";
 
@@ -20,10 +30,25 @@ export async function POST(request: Request) {
   if (!username || !password) {
     return NextResponse.json({ error: "missing credentials" }, { status: 400 });
   }
+
+  const startedAt = Date.now();
+  const key = attemptKey(username, clientIp(request));
+
+  if (isLockedOut(key)) {
+    const delayed = await delayLockout();
+    if (!delayed) return tooManyResponse();
+    return tooManyResponse();
+  }
+
   const user = await authenticate(username, password);
   if (!user) {
+    recordFailure(key);
+    const delayed = await delayFailedLogin(startedAt);
+    if (!delayed) return tooManyResponse();
     return NextResponse.json({ error: "invalid credentials" }, { status: 401 });
   }
+
+  resetFailures(key);
   const token = await signSession(user);
   const res = NextResponse.json({
     ok: true,

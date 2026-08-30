@@ -64,7 +64,7 @@ Write users cannot create sessions inside someone else's project. Share is per c
 ## Sharing
 
 1. Sign in as the owner. Open a session. **share** → username + `read-only` or `read-write`.
-2. The other user sees it under **shared with me**.
+2. The other user sees it under **shared with me`.
 3. Read-only: live chat + artifacts, composer locked. Read-write: prompt, cancel in-flight turn, rename, compact, rewind. Owner-only: share, delete, destroy sandbox.
 
 If two people have the same session open, they share one grok ACP turn. The server fans `session/update` to every EventSource on that session. Sidebar-only is a snapshot until they click in.
@@ -92,7 +92,7 @@ See `Dockerfile` / `docker-compose.yml` for a containerized variant. Compose sti
 
 ## What works
 
-- Cookie JWT auth, scrypt passwords. Role is loaded from SQLite on each request (not trusted from the JWT). Google SSO is on hold.
+- Cookie JWT auth, scrypt passwords. Role is loaded from SQLite on each request (not trusted from the JWT). Google SSO is on hold. Failed logins are delayed; repeated failures 429.
 - SQLite WAL at `dataRoot()/buildinator.sqlite` (`./data/...` locally, `$BUILDINATOR_ROOT/data/...` when set).
 - Workspaces `projectsRoot()/<userId>/<projectId>/` (`./data/sandboxes/...` locally, `$BUILDINATOR_ROOT/projects/...` when set). Cross-project deps only via explicit links at `deps/<name>`.
 - ACP stdio + SSE streaming (thoughts, tokens, tools, plan artifact). EventSource reconnects with backoff; the server replays a per-session ring of recent events, then continues live. Opening (or reconnecting) SSE also refetches `GET /api/sessions/:id` so missed chunks appear without a manual refresh.

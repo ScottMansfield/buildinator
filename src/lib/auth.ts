@@ -22,13 +22,17 @@ function toSessionUser(row: {
   };
 }
 
+// Dummy scrypt hash so unknown users pay the same verify cost as a real miss.
+const DUMMY_PASSWORD_HASH =
+  "scrypt$00000000000000000000000000000000$" + "00".repeat(64);
+
 export async function authenticate(
   username: string,
   password: string,
 ): Promise<SessionUser | null> {
   const row = findUserByUsername(username);
-  if (!row) return null;
-  if (!verifyPassword(password, row.password_hash)) return null;
+  const ok = verifyPassword(password, row?.password_hash ?? DUMMY_PASSWORD_HASH);
+  if (!row || !ok) return null;
   return toSessionUser(row);
 }
 
