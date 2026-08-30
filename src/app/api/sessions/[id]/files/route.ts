@@ -5,7 +5,7 @@ import { getAdapter } from "@/lib/get-adapter";
 import { getSessionUser } from "@/lib/auth";
 import { getProjectRow } from "@/lib/db";
 import { jsonError } from "@/lib/http";
-import { pathInsideSandbox, sandboxPath } from "@/lib/sandbox";
+import { pathInsideSandbox, ensureSessionSandbox } from "@/lib/sandbox";
 
 export const runtime = "nodejs";
 
@@ -30,7 +30,7 @@ export async function GET(request: Request, ctx: Ctx) {
     if (!project) {
       return NextResponse.json({ error: "not found" }, { status: 404 });
     }
-    const sandbox = sandboxPath(project.owner_id, project.id);
+    const sandbox = ensureSessionSandbox(project.owner_id, project.id, id);
     const abs = pathInsideSandbox(sandbox, rel);
     if (!abs) {
       return NextResponse.json({ error: "not found" }, { status: 404 });
