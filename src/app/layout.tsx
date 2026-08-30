@@ -10,7 +10,7 @@ export const metadata: Metadata = {
   icons: { icon: "/favicon.svg" },
 };
 
-const themeBoot = `(function(){try{var t=localStorage.getItem("buildinator-theme");if(t==="default")t="web";if(t==="tui"||t==="grokday"||t==="web"||t==="light")document.documentElement.setAttribute("data-theme",t);else document.documentElement.setAttribute("data-theme","tui");}catch(e){document.documentElement.setAttribute("data-theme","tui");}})();`;
+const themeBoot = `(function(){try{var t=localStorage.getItem("buildinator-theme");if(t==="default")t="web";if(t==="tui"||t==="grokday"||t==="web"||t==="light")document.documentElement.setAttribute("data-theme",t);else document.documentElement.setAttribute("data-theme","tui");var f=localStorage.getItem("buildinator-font-size");if(f==="12"||f==="13"||f==="14"||f==="16")document.documentElement.style.setProperty("--ui-font-size",f+"px");}catch(e){document.documentElement.setAttribute("data-theme","tui");}})();`;
 
 export default function RootLayout({
   children,
