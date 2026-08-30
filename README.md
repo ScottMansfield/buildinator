@@ -6,7 +6,7 @@ Buildinator — the app, VM, ACP UI, and themes — was built with Grok Bot.
 
 Scott likes the TUI. This is that session manager in a browser: projects as sandboxes, a real chat transcript, artifacts on the right, and per-conversation sharing. Metadata lives in SQLite. Live grok talks ACP over stdio (`grok agent --always-approve stdio`). Thoughts, tokens, and tool cards stream into the pane. The HTTPS UI is the only internet-facing port; grok never binds a public socket.
 
-Four themes (localStorage `buildinator-theme`, default `tui`). **TUI:** groknight (`tui`) and grokday. **web:** dark (`web`) and light. `t` cycles; the header picker groups them. Stored `default` maps to web. Font size is `font: 12` in the header (12/13/14/16, default 14, `buildinator-font-size`). Typing `/` in the composer lists `/help`, `/rename`, `/compact`, and `/rewind`. `?` / Ctrl+. / F2 opens Keyboard Shortcuts. `!` on an empty composer runs a sandbox shell.
+Four themes (localStorage `buildinator-theme`, default `tui`). **TUI:** groknight (`tui`) and grokday. **web:** dark (`web`) and light. `t` cycles; the header picker groups them. Stored `default` maps to web. Font size is `font size: 12` in the header (dropdown 12/13/14/16, default 14, `buildinator-font-size`). Typing `/` in the composer lists `/help`, `/rename`, `/compact`, and `/rewind`. `?` / Ctrl+. / F2 opens Keyboard Shortcuts. `!` on an empty composer runs a sandbox shell.
 
 ## Run it
 
