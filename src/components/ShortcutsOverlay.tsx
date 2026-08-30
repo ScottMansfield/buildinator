@@ -35,7 +35,7 @@ const GROUPS: { label: string; items: Row[] }[] = [
     items: [
       { keys: "[ / ]", hint: "collapse / expand artifacts" },
       { keys: "Page Up / Down", hint: "scroll transcript" },
-      { keys: "font: 12", hint: "header control · 12 / 13 / 14 / 16" },
+      { keys: "font size: 12", hint: "header picker · 12 / 13 / 14 / 16" },
     ],
   },
 ];

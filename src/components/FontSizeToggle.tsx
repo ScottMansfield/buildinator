@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export type FontPx = 12 | 13 | 14 | 16;
 
@@ -27,6 +27,8 @@ export function readFontSize(): FontPx {
 
 export function FontSizeToggle() {
   const [size, setSize] = useState<FontPx>(14);
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const next = readFontSize();
@@ -34,9 +36,22 @@ export function FontSizeToggle() {
     applyFontSize(next);
   }, []);
 
-  const cycle = useCallback(() => {
-    const i = SIZES.indexOf(size);
-    const next = SIZES[(i + 1) % SIZES.length];
+  useEffect(() => {
+    function onDoc(e: MouseEvent) {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, []);
+
+  const choose = useCallback((next: FontPx) => {
     setSize(next);
     applyFontSize(next);
     try {
@@ -44,16 +59,38 @@ export function FontSizeToggle() {
     } catch {
       // ignore
     }
-  }, [size]);
+    setOpen(false);
+  }, []);
 
   return (
-    <button
-      type="button"
-      className="btn btn-ghost"
-      onClick={cycle}
-      title="Font size (cycles 12 / 13 / 14 / 16)"
-    >
-      font: {size}
-    </button>
+    <div className="theme-picker" ref={wrapRef}>
+      <button
+        type="button"
+        className="btn btn-ghost"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        aria-label="Font size"
+        title="Font size"
+      >
+        font size: {size}
+      </button>
+      {open ? (
+        <div className="theme-menu" role="listbox" aria-label="Font size">
+          {SIZES.map((n) => (
+            <button
+              key={n}
+              type="button"
+              role="option"
+              aria-selected={size === n}
+              className={"theme-option" + (size === n ? " selected" : "")}
+              onClick={() => choose(n)}
+            >
+              {n}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
