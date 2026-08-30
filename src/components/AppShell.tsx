@@ -23,6 +23,8 @@ import { Sidebar } from "./Sidebar";
 import { ChatPane } from "./ChatPane";
 import { ArtifactsPane } from "./ArtifactsPane";
 import { ThemeToggle } from "./ThemeToggle";
+import { FontSizeToggle } from "./FontSizeToggle";
+import { ShortcutsOverlay } from "./ShortcutsOverlay";
 import { useTheme } from "./ThemeProvider";
 import { SharePanel } from "./SharePanel";
 import { UsersPanel } from "./UsersPanel";
@@ -54,7 +56,7 @@ const HELP = [
   "/compact — compact grok context (write)",
   "Esc — cancel the in-flight turn (write); queued follow-ups still send",
   "resume / fork live on the session row, not as slashes",
-  "keys: j/k sessions · n new · [ ] artifacts · t theme · / composer · Esc cancel",
+  "keys: j/k sessions · n new · [ ] artifacts · t cycle theme · / composer · ? shortcuts · Esc cancel",
 ].join("\n");
 
 
@@ -107,6 +109,7 @@ export function AppShell({ user }: Props) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
   const [usersOpen, setUsersOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const accountWrite = canAccountWrite(user.role);
 
   const selectedProject = useMemo(
@@ -419,7 +422,6 @@ export function AppShell({ user }: Props) {
           ),
         );
         await refreshLists();
-        // Prompt response is source of truth if list refresh is still stale.
         if (titled) {
           setDetail((prev) => (prev && prev.id === sid ? { ...prev, title: titled } : prev));
           setSessions((list) =>
@@ -585,6 +587,24 @@ export function AppShell({ user }: Props) {
     window.location.assign("/login");
   }
 
+  async function runShell(command: string) {
+    if (!selectedId) return;
+    if (!accountWrite || !can(role, "write")) {
+      setNotice("Read-only: cannot run shell.");
+      return;
+    }
+    setDraft("");
+    try {
+      const data = await api<{ session: SessionDetail }>(`/api/sessions/${selectedId}/shell`, {
+        method: "POST",
+        body: JSON.stringify({ command }),
+      });
+      setDetail(data.session);
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "shell failed");
+    }
+  }
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const target = e.target as HTMLElement | null;
@@ -593,6 +613,39 @@ export function AppShell({ user }: Props) {
         (target.tagName === "INPUT" ||
           target.tagName === "TEXTAREA" ||
           target.isContentEditable);
+      if (e.key === "Escape" && shortcutsOpen) {
+        e.preventDefault();
+        setShortcutsOpen(false);
+        return;
+      }
+      if (e.key === "F2" || (e.key === "." && e.ctrlKey && !e.metaKey && !e.altKey)) {
+        e.preventDefault();
+        setShortcutsOpen((o) => !o);
+        return;
+      }
+      if (e.key === "?" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const composerEmpty =
+          !draft.trim() &&
+          (target?.id === "composer" || !typing);
+        if (typing && target?.id === "composer" && draft) {
+          return;
+        }
+        if (composerEmpty || !typing) {
+          e.preventDefault();
+          setShortcutsOpen(true);
+          return;
+        }
+      }
+      if (e.key === "PageUp" || e.key === "PageDown") {
+        const log = document.querySelector(".msg-log");
+        if (log instanceof HTMLElement) {
+          e.preventDefault();
+          const dir = e.key === "PageDown" ? 1 : -1;
+          log.scrollBy({ top: dir * Math.max(120, log.clientHeight * 0.9) });
+        }
+        return;
+      }
+      if (shortcutsOpen) return;
       if (e.key === "t" && !typing) {
         e.preventDefault();
         toggleTheme();
@@ -650,6 +703,8 @@ export function AppShell({ user }: Props) {
     loadSession,
     toggleTheme,
     accountWrite,
+    shortcutsOpen,
+    draft,
   ]);
 
   const shares: SessionShare[] = detail?.shares ?? [];
@@ -663,6 +718,7 @@ export function AppShell({ user }: Props) {
         </span>
         <div className="chrome-spacer" />
         <ThemeToggle />
+        <FontSizeToggle />
         {isAdmin(user.role) ? (
           <button
             type="button"
@@ -708,12 +764,14 @@ export function AppShell({ user }: Props) {
             draft={draft}
             onDraft={setDraft}
             onSend={(t) => void onCommand(t)}
+            onShell={(c) => void runShell(c)}
             onCancel={() => void cancelTurn()}
             sending={sending}
             notice={notice}
             role={accountWrite ? role : "read"}
             onShare={() => setShareOpen(true)}
             activity={activity}
+            overlayOpen={shortcutsOpen}
           />
           <ArtifactsPane
             artifacts={detail?.artifacts ?? []}
@@ -724,13 +782,14 @@ export function AppShell({ user }: Props) {
         </div>
       )}
       <footer className="status-bar">
-        <span>j/k n [ ] t · Esc cancel · /help</span>
+        <span>j/k n [ ] t · ? shortcuts · Esc cancel · /help</span>
         <span className="status-model">
           {detail
             ? modelStatusLine(detail.model, detail.variant, detail.approval)
             : "Grok 4.6 (high) · always-approve"}
         </span>
       </footer>
+      <ShortcutsOverlay open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       <UsersPanel open={usersOpen} onClose={() => setUsersOpen(false)} />
       <SharePanel
         open={shareOpen && accountWrite && role === "owner"}
