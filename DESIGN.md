@@ -22,10 +22,11 @@
 6. Hold Google SSO. Username/password stays.
 7. Real session/project/share/user metadata in SQLite (WAL,
    better-sqlite3). Transcripts may stay mock-in-memory.
-8. TUI skin matches Grok Night (screenshot): charcoal/black, monospace,
-   `>` user prefix, timestamps on the right, dim action lines, teal
+8. TUI skins match Grok Night / Grok Day (screenshots): monospace,
+   `>` user prefix, timestamps on the right, dim action lines,
    identifiers, model + variant bottom-right, path + context meter in
-   the header, block cursor on the composer.
+   the header, block cursor on the composer. Night is charcoal/teal;
+   Day is light gray with blue commands and gold flags.
 
 /resume and /fork are **not** in-session slashes — they live on the
 session row because they deal with things outside the current session.
@@ -37,7 +38,8 @@ Next.js App Router + TypeScript + Tailwind + better-sqlite3.
 - App Router: pages and API in one process.
 - Middleware: cookie JWT gate (jose). Edge-safe; sqlite stays in Node
   route handlers.
-- TUI is data-theme=tui (default). web is the previous amber dark UI.
+- Themes: tui (Grok Night, default), grokday, web (amber dark), light.
+  TUI layout is shared by tui + grokday. Picker groups TUI vs web.
 
 ## Information architecture
 
@@ -89,7 +91,7 @@ SQLite on each request, not the JWT. Seeded user hashed with scrypt.
 
 Not a second app. ThemeProvider writes data-theme + localStorage.
 Default is TUI (Grok Night). Keyboard: j/k sessions, n new, [ ]
-artifacts, t theme, / composer. Ignored while typing.
+artifacts, t cycle theme, / composer (slash list). Ignored while typing.
 
 ## What we did not copy
 

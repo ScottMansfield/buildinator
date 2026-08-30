@@ -115,6 +115,10 @@ html[data-theme="tui"] .live-status {
   border-top-color: #1a1a1a;
 }
 
+html[data-theme="grokday"] .live-status {
+  border-top-color: var(--border);
+}
+
 .live-status.thinking,
 .live-status.working,
 .live-status.writing {
