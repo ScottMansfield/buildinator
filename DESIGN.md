@@ -96,3 +96,24 @@ artifacts, t cycle theme, / composer (slash list). Ignored while typing.
 ## What we did not copy
 
 xai-org/grok-build source stays out of this repo.
+
+## Subagent trees (ACP parents)
+
+Official ACP has no standard `parentToolCallId`. Claude Code puts a vendor
+parent on `_meta.claudeCode.parentToolUseId`. Grok `tool_call` updates look
+like `{ toolCallId, title, kind, rawInput, _meta["x.ai/tool"] }` with names
+such as `read_file`, `web_search`, `task`, `grep`. Grok `task` is a subagent
+spawn; child tools are **not** reliably attributed to that task (Copilot even
+flattens subagent text into the parent stream). Local grok logs here did not
+show a grok-specific parent field we could trust.
+
+Buildinator nests in the sidebar **only** when `_meta.parentToolCallId`,
+`_meta.claudeCode.parentToolUseId`, or `_meta["x.ai/tool"].parentToolCallId`
+is present. We never infer a tree from timing. `task` still renders as a
+spawn node with no children. `_x.ai/queue/interject` and
+`_x.ai/toggle_plan_mode` are not callable (`-32601`); the composer queue is
+client-side. `session/set_model` `{sessionId, modelId}` and `session/set_mode`
+`{sessionId, modeId}` (effort: low/medium/high) work. Permission is spawn
+`--permission-mode` / `--always-approve` plus `session/new` `_meta.yoloMode` /
+`autoMode`. One shared grok child serves every session; we do not respawn it
+to change permission.
