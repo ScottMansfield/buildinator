@@ -593,6 +593,9 @@ export function updateSessionMeta(
     tokenInput: number;
     tokenOutput: number;
     acpSessionId: string | null;
+    model: string;
+    variant: string;
+    approval: string;
   }>,
 ): void {
   const current = getSessionRow(id);
@@ -601,7 +604,7 @@ export function updateSessionMeta(
     patch.acpSessionId === undefined ? current.acp_session_id : patch.acpSessionId;
   getDb()
     .prepare(
-      `UPDATE sessions SET title = ?, status = ?, updated_at = ?, token_input = ?, token_output = ?, acp_session_id = ? WHERE id = ?`,
+      `UPDATE sessions SET title = ?, status = ?, updated_at = ?, token_input = ?, token_output = ?, acp_session_id = ?, model = ?, variant = ?, approval = ? WHERE id = ?`,
     )
     .run(
       patch.title ?? current.title,
@@ -610,6 +613,9 @@ export function updateSessionMeta(
       patch.tokenInput ?? current.token_input,
       patch.tokenOutput ?? current.token_output,
       acpSessionId,
+      patch.model ?? current.model,
+      patch.variant ?? current.variant,
+      patch.approval ?? current.approval,
       id,
     );
 }
