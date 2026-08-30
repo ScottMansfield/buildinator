@@ -1,9 +1,11 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import type { Project, SessionSummary } from "@/lib/types";
+import type { Project, SessionSummary, ToolCall } from "@/lib/types";
 import { relativeTime } from "@/lib/format";
 import { can } from "@/lib/acl";
+import { isTaskSpawn } from "@/lib/acp-meta";
+import { nestTools, toolLabel } from "@/lib/tool-tree";
 
 type Props = {
   projects: Project[];
@@ -21,7 +23,50 @@ type Props = {
   search: string;
   onSearch: (q: string) => void;
   canWrite: boolean;
+  selectedTools?: ToolCall[];
 };
+
+function statusDotClass(status: ToolCall["status"]): string {
+  if (status === "completed") return "done";
+  if (status === "running") return "running";
+  if (status === "pending") return "pending";
+  return "error";
+}
+
+function AgentNode({ tool, depth }: { tool: ToolCall; depth: number }) {
+  const spawn = isTaskSpawn(tool.name, tool.kind);
+  return (
+    <div
+      className={"agent-node" + (spawn ? " spawn" : "")}
+      style={{ paddingLeft: 10 + depth * 12 }}
+      title={tool.status}
+    >
+      <span
+        className={"status-dot " + statusDotClass(tool.status)}
+        aria-label={tool.status}
+      />
+      <span className="agent-label">{toolLabel(tool)}</span>
+    </div>
+  );
+}
+
+function AgentsTree({ tools }: { tools: ToolCall[] }) {
+  if (tools.length === 0) return null;
+  const { roots, children } = nestTools(tools);
+  return (
+    <div className="agents-tree" aria-label="Agents">
+      <div className="agents-head">agents</div>
+      {roots.map((tool) => (
+        <div key={tool.id}>
+          <AgentNode tool={tool} depth={0} />
+          {(children.get(tool.id) ?? []).map((child) => (
+            <AgentNode key={child.id} tool={child} depth={1} />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function SessionRow({
   s,
@@ -33,6 +78,7 @@ function SessionRow({
   onShare,
   onDelete,
   canWrite,
+  tools,
 }: {
   s: SessionSummary;
   selected: boolean;
@@ -43,6 +89,7 @@ function SessionRow({
   onShare: (id: string) => void;
   onDelete: (id: string) => void;
   canWrite: boolean;
+  tools?: ToolCall[];
 }) {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(s.title);
@@ -63,6 +110,7 @@ function SessionRow({
   }
 
   return (
+    <>
     <div className={"session-row" + (selected ? " active" : "")}>
       {editing && write ? (
         <form onSubmit={submitRename} className="rename-form">
@@ -97,7 +145,11 @@ function SessionRow({
         >
           <span className="session-title">{s.title}</span>
           <span className="session-meta">
-            <span className={"badge " + s.status}>{s.status}</span>
+            <span
+              className={"status-dot " + (s.status === "running" ? "running" : s.status === "error" ? "error" : "pending")}
+              title={s.status}
+              aria-label={s.status}
+            />
             {s.myRole !== "owner" ? (
               <span className="share-badge">
                 {s.myRole === "write" ? "rw" : "ro"}
@@ -185,6 +237,8 @@ function SessionRow({
         ) : null}
       </div>
     </div>
+    {selected && tools && tools.length > 0 ? <AgentsTree tools={tools} /> : null}
+    </>
   );
 }
 
@@ -204,6 +258,7 @@ export function Sidebar({
   search,
   onSearch,
   canWrite,
+  selectedTools = [],
 }: Props) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [picker, setPicker] = useState(false);
@@ -410,6 +465,7 @@ export function Sidebar({
                       onShare={onShare}
                       onDelete={onDelete}
                       canWrite={canWrite}
+                      tools={s.id === selectedId ? selectedTools : undefined}
                     />
                   ))}
                   {canWrite ? (
@@ -443,6 +499,7 @@ export function Sidebar({
                 onShare={onShare}
                 onDelete={onDelete}
                 canWrite={canWrite}
+                tools={s.id === selectedId ? selectedTools : undefined}
               />
             ))}
           </div>
@@ -462,6 +519,7 @@ export function Sidebar({
                 onShare={onShare}
                 onDelete={onDelete}
                 canWrite={canWrite}
+                tools={s.id === selectedId ? selectedTools : undefined}
               />
             ))}
           </div>
