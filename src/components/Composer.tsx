@@ -65,6 +65,7 @@ export function Composer({
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [shellMode, setShellMode] = useState(false);
   const [histIdx, setHistIdx] = useState<number | null>(null);
+  const [focused, setFocused] = useState(false);
   const draftRef = useRef("");
   const matches = useMemo(() => matchingSlash(value), [value]);
   const showPalette =
@@ -267,8 +268,10 @@ export function Composer({
           }
           onChange={(e) => typeValue(e.target.value)}
           onKeyDown={onKeyDown}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
         />
-        {!value && !disabled ? (
+        {!value && !disabled && focused ? (
           <span className="block-cursor" aria-hidden />
         ) : null}
       </div>
