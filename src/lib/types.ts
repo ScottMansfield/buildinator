@@ -91,6 +91,10 @@ export interface ToolCall {
   input: Record<string, string>;
   output?: string;
   createdAt: string;
+  /** Set only when ACP `_meta` names a parent. Never inferred from timing. */
+  parentId?: string;
+  /** ACP tool kind (e.g. task, read, execute). */
+  kind?: string;
 }
 
 export interface Artifact {

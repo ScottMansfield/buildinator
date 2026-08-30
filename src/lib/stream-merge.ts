@@ -49,21 +49,23 @@ function mergeMessages(prev: ChatMessage[], incoming: ChatMessage[]): ChatMessag
   return out;
 }
 
+export function mergeOneTool(prev: ToolCall | undefined, incoming: ToolCall): ToolCall {
+  if (!prev) return { ...incoming, input: { ...incoming.input } };
+  return {
+    ...prev,
+    ...incoming,
+    input: { ...prev.input, ...incoming.input },
+    output: incoming.output ?? prev.output,
+    parentId: incoming.parentId ?? prev.parentId,
+    kind: incoming.kind ?? prev.kind,
+  };
+}
+
 function mergeTools(prev: ToolCall[], incoming: ToolCall[]): ToolCall[] {
   const byId = new Map<string, ToolCall>();
   for (const t of prev) byId.set(t.id, t);
   for (const t of incoming) {
-    const old = byId.get(t.id);
-    if (!old) {
-      byId.set(t.id, { ...t, input: { ...t.input } });
-      continue;
-    }
-    byId.set(t.id, {
-      ...old,
-      ...t,
-      input: { ...old.input, ...t.input },
-      output: t.output ?? old.output,
-    });
+    byId.set(t.id, mergeOneTool(byId.get(t.id), t));
   }
   const out: ToolCall[] = [];
   const seen = new Set<string>();
