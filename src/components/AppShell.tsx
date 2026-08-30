@@ -211,3 +211,209 @@ export function AppShell({ user }: Props) {
     focusNavRef.current = false;
     focusSessionItem(selectedId);
   }, [selectedId]);
+
+  useEffect(() => {
+    if (!selectedId) return;
+    const sid = selectedId;
+    let closed = false;
+    let es: EventSource | null = null;
+    let retry = 0;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    const applyActivity = (phase: SessionActivity["phase"]) => {
+      setActivity((prev) => bumpActivity(prev, phase));
+    };
+    const handleEvent = (ev: MessageEvent) => {
+      if (!ev.data || ev.data === ": connected") return;
+      let event: SessionStreamEvent;
+      try {
+        event = JSON.parse(ev.data) as SessionStreamEvent;
+      } catch {
+        return;
+      }
+      if (selectedRef.current !== sid) return;
+      if (event.type === "message") {
+        applyActivity("writing");
+        setDetail((prev) => {
+          const stamped = stampLastThoughtEnd(prev, sid);
+          return upsertStreamMessage(stamped, sid, event);
+        });
+      } else if (event.type === "thought") {
+        applyActivity("thinking");
+        setDetail((prev) =>
+          upsertStreamMessage(prev, sid, { id: event.id, role: "thought", content: event.content }),
+        );
+      } else if (event.type === "tool") {
+        applyActivity("working");
+        setDetail((prev) => {
+          const base = stampLastThoughtEnd(prev, sid);
+          if (!base || base.id !== sid) return base;
+          const idx = base.toolCalls.findIndex((t) => t.id === event.tool.id);
+          const toolCalls = base.toolCalls.slice();
+          if (idx >= 0) toolCalls[idx] = event.tool;
+          else toolCalls.push(event.tool);
+          return { ...base, toolCalls };
+        });
+      } else if (event.type === "activity") {
+        applyActivity(event.phase);
+      } else if (event.type === "status") {
+        if (event.status === "running") {
+          setActivity((prev) =>
+            prev.phase === "idle" ? bumpActivity(prev, "thinking") : { ...prev, lastEventAt: Date.now() },
+          );
+        } else {
+          applyActivity("idle");
+        }
+        setDetail((prev) => (prev && prev.id === sid ? { ...prev, status: event.status } : prev));
+      } else if (event.type === "artifact") {
+        setDetail((prev) => {
+          if (!prev || prev.id !== sid) return prev;
+          const a = event.artifact;
+          const idx = prev.artifacts.findIndex(
+            (x) =>
+              x.id === a.id ||
+              (x.kind === "file" && a.kind === "file" && x.title === a.title),
+          );
+          const artifacts = prev.artifacts.slice();
+          if (idx >= 0) artifacts[idx] = a;
+          else artifacts.push(a);
+          return { ...prev, artifacts };
+        });
+      } else if (event.type === "title") {
+        setDetail((prev) => (prev && prev.id === sid ? { ...prev, title: event.title } : prev));
+        setSessions((list) =>
+          list.map((s) => (s.id === sid ? { ...s, title: event.title } : s)),
+        );
+      } else if (event.type === "done") {
+        applyActivity("idle");
+        void (async () => {
+          try {
+            await loadSession(sid);
+            await refreshLists();
+          } catch {
+            // keep live state if reconcile fails
+          }
+          if (sendingRef.current) onTurnEndedRef.current(sid, true);
+        })();
+      } else if (event.type === "error") {
+        applyActivity("idle");
+        setNotice(event.message);
+        setDetail((prev) => (prev && prev.id === sid ? { ...prev, status: "error" } : prev));
+        void (async () => {
+          try {
+            await loadSession(sid);
+            await refreshLists();
+          } catch {
+            // keep live state if reconcile fails
+          }
+          if (sendingRef.current) onTurnEndedRef.current(sid, true);
+        })();
+      }
+    };
+    const refetch = async () => {
+      try {
+        const data = await api<{ session: SessionDetail }>(`/api/sessions/${sid}`);
+        if (selectedRef.current !== sid) return;
+        setDetail((prev) => mergeStreamDetail(prev, data.session));
+      } catch {
+        // live stream still authoritative
+      }
+    };
+    const connect = () => {
+      if (closed) return;
+      es = new EventSource(`/api/sessions/${sid}/events`);
+      es.addEventListener("message", handleEvent);
+      es.onopen = () => {
+        retry = 0;
+        void refetch();
+      };
+      es.onerror = () => {
+        es?.close();
+        es = null;
+        if (closed) return;
+        const delay = Math.min(8000, 500 * 2 ** retry);
+        retry += 1;
+        retryTimer = setTimeout(connect, delay);
+      };
+    };
+    setActivity(IDLE_ACTIVITY);
+    connect();
+    return () => {
+      closed = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      es?.close();
+    };
+  }, [selectedId, loadSession, refreshLists]);
+
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await refreshLists();
+        if (cancelled) return;
+        const stored = readStoredSelectedId();
+        const pick =
+          stored && list.some((s) => s.id === stored) ? stored : list[0]?.id;
+        if (pick) await loadSession(pick);
+      } catch (err) {
+        if (!cancelled) {
+          setLoadError(err instanceof Error ? err.message : "load failed");
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshLists, loadSession]);
+
+  async function createProject(name: string) {
+    try {
+      const data = await api<{ project: Project }>("/api/projects", {
+        method: "POST",
+        body: JSON.stringify({ name }),
+      });
+      await refreshLists();
+      await createSession(data.project.id);
+      setNotice(`Created project ${data.project.name}`);
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "create project failed");
+    }
+  }
+
+  async function createSession(projectId: string) {
+    const data = await api<{ session: SessionDetail }>("/api/sessions", {
+      method: "POST",
+      body: JSON.stringify({ projectId }),
+    });
+    await refreshLists();
+    setDetail(data.session);
+    setSelectedId(data.session.id);
+    writeStoredSelectedId(data.session.id);
+    setNotice("Created session.");
+  }
+
+  async function rename(id: string, title: string) {
+    await api(`/api/sessions/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ title }),
+    });
+    await refreshLists();
+    if (selectedId === id) await loadSession(id);
+    setNotice(`Renamed to ${title}`);
+  }
+
+  function appendLocal(sid: string, text: string, label: string) {
+    const now = new Date().toISOString();
+    setDetail((prev) => {
+      if (!prev || prev.id !== sid) return prev;
+      return {
+        ...prev,
+        status: "running",
+        messages: [
+          ...prev.messages,
+          { id: crypto.randomUUID(), role: "user", content: text, createdAt: now },
+          { id: crypto.randomUUID(), role: "action", content: label, createdAt: now },
+        ],
+      };
+    });
+  }
