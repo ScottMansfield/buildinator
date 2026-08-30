@@ -33,6 +33,8 @@ type Props = {
   onDropQueued?: (index: number) => void;
   onClearQueue?: () => void;
   findOpen?: boolean;
+  findQuery?: string;
+  onFindQuery?: (q: string) => void;
   onFindOpen?: (open: boolean) => void;
 };
 
@@ -62,6 +64,8 @@ export function ChatPane({
   onDropQueued,
   onClearQueue,
   findOpen = false,
+  findQuery = "",
+  onFindQuery,
   onFindOpen,
 }: Props) {
   const readOnly = role === "read";
@@ -78,7 +82,6 @@ export function ChatPane({
   const crumbKeyRef = useRef("");
   const lastUserId = lastUserMessageId(session);
   const [outputOnly, setOutputOnly] = useState(false);
-  const [findQuery, setFindQuery] = useState("");
   const [findIndex, setFindIndex] = useState(0);
 
   useEffect(() => {
@@ -100,6 +103,10 @@ export function ChatPane({
       return next;
     });
   }
+
+  useEffect(() => {
+    setFindIndex(0);
+  }, [session?.id]);
 
   useEffect(() => {
     if (!findOpen) return;
@@ -215,7 +222,7 @@ export function ChatPane({
             <FindBar
               query={findQuery}
               onQuery={(q) => {
-                setFindQuery(q);
+                onFindQuery?.(q);
                 setFindIndex(0);
               }}
               matchIndex={findIndex}
@@ -225,7 +232,7 @@ export function ChatPane({
               includeTools={!outputOnly}
               onClose={() => {
                 onFindOpen?.(false);
-                setFindQuery("");
+                onFindQuery?.("");
                 setFindIndex(0);
                 requestAnimationFrame(() => {
                   const el = document.getElementById("composer");
