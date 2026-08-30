@@ -505,7 +505,7 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
       const output = toolOutputFrom(update) ?? existing?.output;
       const status = update.status ? mapToolStatus(String(update.status)) : existing?.status ?? "pending";
       const parentId = parentIdFromAcpMeta(update._meta) ?? existing?.parentId;
-      const toolKind =
+      const kind =
         typeof update.kind === "string" && update.kind
           ? update.kind
           : existing?.kind;
@@ -517,7 +517,7 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
         output,
         createdAt: existing?.createdAt ?? now,
         ...(parentId ? { parentId } : {}),
-        ...(toolKind ? { kind: toolKind } : {}),
+        ...(kind ? { kind } : {}),
       };
       if (existing) {
         existing.name = tool.name;
