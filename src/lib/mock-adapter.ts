@@ -28,6 +28,7 @@ import {
   isSessionNotFoundError,
   type AcpUpdate,
 } from "./acp-client";
+import { parentIdFromAcpMeta } from "./acp-meta";
 import { emit } from "./session-events";
 import {
   destroySandbox,
@@ -503,6 +504,11 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
           : existing?.input ?? mapToolInput(undefined, title || name);
       const output = toolOutputFrom(update) ?? existing?.output;
       const status = update.status ? mapToolStatus(String(update.status)) : existing?.status ?? "pending";
+      const parentId = parentIdFromAcpMeta(update._meta) ?? existing?.parentId;
+      const toolKind =
+        typeof update.kind === "string" && update.kind
+          ? update.kind
+          : existing?.kind;
       const tool: ToolCall = {
         id: toolCallId,
         name,
@@ -510,12 +516,16 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
         input,
         output,
         createdAt: existing?.createdAt ?? now,
+        ...(parentId ? { parentId } : {}),
+        ...(toolKind ? { kind: toolKind } : {}),
       };
       if (existing) {
         existing.name = tool.name;
         existing.status = tool.status;
         existing.input = tool.input;
         existing.output = tool.output;
+        if (tool.parentId) existing.parentId = tool.parentId;
+        if (tool.kind) existing.kind = tool.kind;
       } else {
         t.toolCalls.push(tool);
       }
@@ -687,7 +697,7 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
         }
         if (loadErr) {
           if (isSessionNotFoundError(loadErr)) {
-            const created = await client.sessionNew(cwd);
+            const created = await client.sessionNew(cwd, getAccessibleSummary(user.id, sessionId)?.approval ?? "always-approve");
             persistAcpSessionId(sessionId, t, created);
             mintedNew = true;
             acpId = created;
@@ -705,7 +715,7 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
           persistAcpSessionId(sessionId, t, previousId);
         }
       } else {
-        const created = await client.sessionNew(cwd);
+        const created = await client.sessionNew(cwd, getAccessibleSummary(user.id, sessionId)?.approval ?? "always-approve");
         persistAcpSessionId(sessionId, t, created);
         mintedNew = true;
         acpId = created;
@@ -887,12 +897,48 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
     sessionId: string,
     title: string,
   ): Promise<SessionSummary> {
+    return this.patchSession(user, sessionId, { title });
+  }
+
+  async patchSession(
+    user: SessionUser,
+    sessionId: string,
+    prefs: { title?: string; approval?: string; model?: string; variant?: string },
+  ): Promise<SessionSummary> {
     requireAccountWrite(user.role);
     const summary = getAccessibleSummary(user.id, sessionId);
     if (!summary) throw new NotFoundError("session not found");
     requireRole(summary.myRole, "write");
-    const next = title.trim() || summary.title;
-    updateSessionMeta(sessionId, { title: next, updatedAt: new Date().toISOString() });
+    const now = new Date().toISOString();
+    const title =
+      prefs.title != null ? prefs.title.trim() || summary.title : undefined;
+    updateSessionMeta(sessionId, {
+      updatedAt: now,
+      ...(title != null ? { title } : {}),
+      ...(prefs.approval ? { approval: prefs.approval } : {}),
+      ...(prefs.model ? { model: prefs.model } : {}),
+      ...(prefs.variant ? { variant: prefs.variant } : {}),
+    });
+    const acpId = resolveAcpSessionId(sessionId, this.transcript(sessionId, summary.projectCwd));
+    if (grokAcpEnabled() && acpId) {
+      const client = getAcpClient();
+      if (prefs.model) {
+        try {
+          await client.sessionSetModel(acpId, prefs.model);
+        } catch (err) {
+          console.error("[acp] session/set_model failed", err);
+        }
+      }
+      if (prefs.variant) {
+        try {
+          await client.sessionSetMode(acpId, prefs.variant);
+        } catch (err) {
+          console.error("[acp] session/set_mode failed", err);
+        }
+      }
+      // No per-session ACP permission method. sqlite/UI persist; the shared
+      // grok child keeps process-level --always-approve.
+    }
     const updated = getAccessibleSummary(user.id, sessionId);
     if (!updated) throw new NotFoundError("session not found");
     return updated;
