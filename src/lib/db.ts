@@ -9,6 +9,7 @@ import {
   ensureSandbox,
   linkDep,
   sandboxPath,
+  setProjectLinkLister,
 } from "./sandbox";
 import { parseUserRole } from "./acl";
 import { AclError, NotFoundError } from "./errors";
@@ -468,6 +469,26 @@ function linksFor(projectId: string): Project["links"] {
     )
     .all(projectId) as Project["links"];
 }
+
+export function listProjectLinkTargets(projectId: string): Array<{
+  name: string;
+  targetOwnerId: string;
+  targetProjectId: string;
+}> {
+  const out: Array<{ name: string; targetOwnerId: string; targetProjectId: string }> = [];
+  for (const link of linksFor(projectId)) {
+    const target = getProjectRow(link.projectId);
+    if (!target) continue;
+    out.push({
+      name: link.name,
+      targetOwnerId: target.owner_id,
+      targetProjectId: target.id,
+    });
+  }
+  return out;
+}
+
+setProjectLinkLister(listProjectLinkTargets);
 
 export function toProject(row: ProjectRow, userId: string): Project {
   return {
