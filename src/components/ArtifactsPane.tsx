@@ -9,6 +9,17 @@ type Props = {
   onToggle: () => void;
 };
 
+/** Drop redundant `kind · title` when title already names the kind. */
+function cardHeading(kind: string, title: string): string {
+  const k = kind.trim();
+  const t = title.trim();
+  if (!t) return k;
+  const kl = k.toLowerCase();
+  const tl = t.toLowerCase();
+  if (tl === kl || tl.includes(kl)) return t;
+  return `${k} · ${t}`;
+}
+
 export function ArtifactsPane({ artifacts, sessionId, collapsed, onToggle }: Props) {
   const files = artifacts.filter((a) => a.kind === "file");
   const cards = artifacts.filter((a) => a.kind !== "file");
@@ -73,7 +84,7 @@ export function ArtifactsPane({ artifacts, sessionId, collapsed, onToggle }: Pro
           cards.map((a) => (
             <article key={a.id} className="artifact">
               <header>
-                {a.kind} · {a.title}
+                {cardHeading(a.kind, a.title)}
               </header>
               <pre>{a.content}</pre>
             </article>
