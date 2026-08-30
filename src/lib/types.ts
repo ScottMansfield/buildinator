@@ -155,6 +155,11 @@ export interface GrokBuildAdapter {
     sessionId: string,
     title: string,
   ): Promise<SessionSummary>;
+  patchSession(
+    user: SessionUser,
+    sessionId: string,
+    prefs: { title?: string; approval?: string; model?: string; variant?: string },
+  ): Promise<SessionSummary>;
   forkSession(user: SessionUser, sessionId: string): Promise<SessionDetail>;
   resumeSession(user: SessionUser, sessionId: string): Promise<SessionDetail>;
   compactSession(user: SessionUser, sessionId: string): Promise<SessionDetail>;

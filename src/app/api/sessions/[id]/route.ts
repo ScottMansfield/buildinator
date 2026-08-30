@@ -26,17 +26,31 @@ export async function PATCH(request: Request, ctx: Ctx) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await ctx.params;
-  let body: { title?: unknown };
+  let body: { title?: unknown; approval?: unknown; model?: unknown; variant?: unknown };
   try {
-    body = (await request.json()) as { title?: unknown };
+    body = (await request.json()) as {
+      title?: unknown;
+      approval?: unknown;
+      model?: unknown;
+      variant?: unknown;
+    };
   } catch {
     return NextResponse.json({ error: "invalid json" }, { status: 400 });
   }
-  if (typeof body.title !== "string" || !body.title.trim()) {
-    return NextResponse.json({ error: "title required" }, { status: 400 });
+  const title = typeof body.title === "string" ? body.title : undefined;
+  const approval = typeof body.approval === "string" ? body.approval : undefined;
+  const model = typeof body.model === "string" ? body.model : undefined;
+  const variant = typeof body.variant === "string" ? body.variant : undefined;
+  if ((title == null || !title.trim()) && !approval && !model && !variant) {
+    return NextResponse.json({ error: "nothing to update" }, { status: 400 });
   }
   try {
-    const session = await getAdapter().renameSession(user, id, body.title);
+    const session = await getAdapter().patchSession(user, id, {
+      ...(title != null ? { title } : {}),
+      ...(approval ? { approval } : {}),
+      ...(model ? { model } : {}),
+      ...(variant ? { variant } : {}),
+    });
     return NextResponse.json({ session });
   } catch (err) {
     return jsonError(err);
