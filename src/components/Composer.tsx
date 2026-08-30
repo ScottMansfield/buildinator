@@ -35,28 +35,40 @@ type Props = {
   value: string;
   onChange: (v: string) => void;
   onSend: (text: string) => void;
+  onShell?: (command: string) => void;
   onCancel?: () => void;
   disabled?: boolean;
   readOnly?: boolean;
   running?: boolean;
   placeholder?: string;
+  history?: string[];
+  historyKey?: string;
+  overlayOpen?: boolean;
 };
 
 export function Composer({
   value,
   onChange,
   onSend,
+  onShell,
   onCancel,
   disabled,
   readOnly,
   running,
   placeholder,
+  history = [],
+  historyKey,
+  overlayOpen = false,
 }: Props) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const [dismissed, setDismissed] = useState(false);
   const [selectedIdx, setSelectedIdx] = useState(0);
+  const [shellMode, setShellMode] = useState(false);
+  const [histIdx, setHistIdx] = useState<number | null>(null);
+  const draftRef = useRef("");
   const matches = useMemo(() => matchingSlash(value), [value]);
-  const showPalette = matches.length > 0 && !dismissed && !disabled && !readOnly;
+  const showPalette =
+    matches.length > 0 && !dismissed && !disabled && !readOnly && !shellMode;
   const selected = showPalette
     ? Math.min(selectedIdx, matches.length - 1)
     : 0;
@@ -71,10 +83,24 @@ export function Composer({
     }
   }, [value]);
 
+  useEffect(() => {
+    setHistIdx(null);
+    setShellMode(false);
+  }, [historyKey]);
+
   function submit() {
     const text = value.trim();
-    if (!text || disabled || readOnly) return;
+    if (disabled || readOnly) return;
+    if (shellMode) {
+      if (!text || !onShell) return;
+      onShell(text);
+      onChange("");
+      setHistIdx(null);
+      return;
+    }
+    if (!text) return;
     onSend(text);
+    setHistIdx(null);
   }
 
   function applySlash(item: SlashCmd) {
@@ -96,12 +122,23 @@ export function Composer({
     submit();
   }
 
+  function typeValue(next: string) {
+    setHistIdx(null);
+    onChange(next);
+  }
+
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Escape") {
       if (showPalette) {
         e.preventDefault();
         e.stopPropagation();
         setDismissed(true);
+        return;
+      }
+      if (shellMode && !value) {
+        e.preventDefault();
+        e.stopPropagation();
+        setShellMode(false);
         return;
       }
       if (running && onCancel) {
@@ -111,6 +148,11 @@ export function Composer({
       }
       return;
     }
+    if (e.key === "!" && !value && !shellMode && !showPalette && !overlayOpen) {
+      e.preventDefault();
+      setShellMode(true);
+      return;
+    }
     if (showPalette && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
       e.preventDefault();
       const n = matches.length;
@@ -118,6 +160,50 @@ export function Composer({
         const cur = Math.min(i, n - 1);
         return e.key === "ArrowDown" ? (cur + 1) % n : (cur - 1 + n) % n;
       });
+      return;
+    }
+    if (overlayOpen && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+      return;
+    }
+    if ((e.key === "ArrowUp" || e.key === "ArrowDown") && !showPalette) {
+      const el = ref.current;
+      const atStart =
+        !value ||
+        (el != null && el.selectionStart === 0 && el.selectionEnd === 0);
+      if (e.key === "ArrowUp") {
+        if (!atStart || history.length === 0) return;
+        e.preventDefault();
+        if (histIdx === null) {
+          draftRef.current = value;
+          const i = history.length - 1;
+          setHistIdx(i);
+          onChange(history[i]);
+        } else if (histIdx > 0) {
+          const i = histIdx - 1;
+          setHistIdx(i);
+          onChange(history[i]);
+        }
+        return;
+      }
+      if (histIdx === null) return;
+      e.preventDefault();
+      if (histIdx < history.length - 1) {
+        const i = histIdx + 1;
+        setHistIdx(i);
+        onChange(history[i]);
+      } else {
+        setHistIdx(null);
+        onChange(draftRef.current);
+      }
+      return;
+    }
+    if (e.key === "Enter" && e.ctrlKey) {
+      e.preventDefault();
+      if (showPalette && matches[selected]) {
+        applySlash(matches[selected]);
+        return;
+      }
+      submit();
       return;
     }
     if (e.key === "Enter" && !e.shiftKey) {
@@ -162,8 +248,8 @@ export function Composer({
         </div>
       ) : null}
       <div className="composer-line">
-        <span className="composer-gt" aria-hidden>
-          &gt;
+        <span className={"composer-gt" + (shellMode ? " shell" : "")} aria-hidden>
+          {shellMode ? "!" : ">"}
         </span>
         <label className="sr-only" htmlFor="composer">
           Message
@@ -175,8 +261,11 @@ export function Composer({
           rows={1}
           value={value}
           disabled={disabled}
-          placeholder={placeholder ?? "Message grok…  /help"}
-          onChange={(e) => onChange(e.target.value)}
+          placeholder={
+            placeholder ??
+            (shellMode ? "shell command in sandbox" : "Message grok…  /help")
+          }
+          onChange={(e) => typeValue(e.target.value)}
           onKeyDown={onKeyDown}
         />
         {!value && !disabled ? (
@@ -185,9 +274,11 @@ export function Composer({
       </div>
       <div className={"composer-meta" + (running ? " composer-meta-running" : "")}>
         <span>
-          {running
-            ? "Enter queues · Shift+Enter newline · Esc cancel"
-            : "Enter to send · Shift+Enter newline · Esc cancel · /help /compact /rewind"}
+          {shellMode
+            ? "Enter runs in sandbox · Esc exits shell"
+            : running
+              ? "Enter queues · Shift+Enter newline · Esc cancel"
+              : "Enter to send · Shift+Enter newline · Esc cancel · /help /compact /rewind"}
         </span>
         <span className="composer-actions">
           {running && onCancel ? (

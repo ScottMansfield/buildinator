@@ -21,12 +21,14 @@ type Props = {
   draft: string;
   onDraft: (v: string) => void;
   onSend: (text: string) => void;
+  onShell?: (command: string) => void;
   onCancel?: () => void;
   sending: boolean;
   notice: string | null;
   role: AccessRole | null;
   onShare?: () => void;
   activity: SessionActivity;
+  overlayOpen?: boolean;
 };
 
 function lastUserMessageId(session: SessionDetail | null): string | null {
@@ -43,12 +45,14 @@ export function ChatPane({
   draft,
   onDraft,
   onSend,
+  onShell,
   onCancel,
   sending,
   notice,
   role,
   onShare,
   activity,
+  overlayOpen,
 }: Props) {
   const readOnly = role === "read";
   const resolved = resolveActivity(session, sending, activity);
@@ -179,10 +183,14 @@ export function ChatPane({
         value={draft}
         onChange={onDraft}
         onSend={onSend}
+        onShell={onShell}
         onCancel={canCancel ? onCancel : undefined}
         disabled={!session}
         readOnly={Boolean(session) && readOnly}
         running={canCancel}
+        history={(session?.messages ?? []).filter((m) => m.role === "user").map((m) => m.content)}
+        historyKey={session?.id}
+        overlayOpen={overlayOpen}
       />
     </section>
   );
