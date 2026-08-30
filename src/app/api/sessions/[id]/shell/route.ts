@@ -5,7 +5,7 @@ import { requireAccountWrite, requireRole } from "@/lib/acl";
 import { getAccessibleSummary, getProjectRow } from "@/lib/db";
 import { jsonError } from "@/lib/http";
 import { newId } from "@/lib/ids";
-import { pathInsideSandbox, ensureSandbox } from "@/lib/sandbox";
+import { pathInsideSandbox, ensureSessionSandbox } from "@/lib/sandbox";
 import { emptyTranscript } from "@/lib/seed-transcripts";
 import { loadTranscript, saveTranscript } from "@/lib/transcript-store";
 import { getAdapter } from "@/lib/get-adapter";
@@ -100,7 +100,7 @@ export async function POST(request: Request, ctx: Ctx) {
     if (!project) {
       return NextResponse.json({ error: "not found" }, { status: 404 });
     }
-    const sandbox = ensureSandbox(project.owner_id, project.id);
+    const sandbox = ensureSessionSandbox(project.owner_id, project.id, id);
     if (commandEscapesSandbox(command, sandbox)) {
       return NextResponse.json(
         { error: "command not allowed outside sandbox" },
