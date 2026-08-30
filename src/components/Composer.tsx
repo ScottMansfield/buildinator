@@ -21,6 +21,7 @@ const SLASH_COMMANDS: SlashCmd[] = [
   { cmd: "/rename", hint: "<title>", send: false, insert: "/rename " },
   { cmd: "/compact", hint: "compact grok context", send: true },
   { cmd: "/rewind", hint: "rewind last turn", send: true },
+  { cmd: "/find", hint: "find in transcript", send: true },
 ];
 
 function matchingSlash(value: string): SlashCmd[] {
@@ -282,7 +283,7 @@ export function Composer({
             ? "Enter runs in sandbox · Esc exits shell"
             : running
               ? "Enter queues · Shift+Enter newline · Esc cancel"
-              : "Enter to send · Shift+Enter newline · Esc cancel · /help /compact /rewind"}
+              : "Enter to send · Shift+Enter newline · Esc cancel · /help /compact /rewind /find"}
         </span>
         <span className="composer-actions">
           {running && onCancel ? (
