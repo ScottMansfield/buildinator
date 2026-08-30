@@ -1,51 +1,68 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type Row = { keys: string; hint: string };
 
-const GROUPS: { label: string; items: Row[] }[] = [
-  {
-    label: "Essentials",
-    items: [
-      { keys: "Enter", hint: "send" },
-      { keys: "Ctrl+Enter", hint: "send" },
-      { keys: "Esc", hint: "close overlay / cancel turn" },
-      { keys: "? · Ctrl+. · F2", hint: "this overlay" },
-    ],
-  },
-  {
-    label: "Composer",
-    items: [
-      { keys: "/", hint: "slash commands (/help /rename /compact /rewind)" },
-      { keys: "↑ / ↓", hint: "prompt history" },
-      { keys: "!", hint: "shell mode (empty composer)" },
-    ],
-  },
-  {
-    label: "Session",
-    items: [
-      { keys: "j / k", hint: "next / previous session" },
-      { keys: "n", hint: "new session" },
-      { keys: "t", hint: "cycle theme" },
-    ],
-  },
-  {
-    label: "Panes",
-    items: [
-      { keys: "[ / ]", hint: "collapse / expand artifacts" },
-      { keys: "Page Up / Down", hint: "scroll transcript" },
-      { keys: "font size: 12", hint: "header picker · 12 / 13 / 14 / 16" },
-    ],
-  },
-];
+function isMacClient(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const nav = navigator as Navigator & { userAgentData?: { platform?: string } };
+  const platform = nav.userAgentData?.platform || navigator.platform || "";
+  return /Mac|iPhone|iPad|iPod/i.test(platform);
+}
 
-const FLAT: Row[] = GROUPS.flatMap((g) => g.items);
+function shortcutGroups(mod: string): { label: string; items: Row[] }[] {
+  return [
+    {
+      label: "Essentials",
+      items: [
+        { keys: "Enter", hint: "send" },
+        { keys: "Ctrl+Enter", hint: "send" },
+        { keys: "Esc", hint: "close overlay / cancel turn" },
+        { keys: "? · Ctrl+. · F2", hint: "this overlay" },
+      ],
+    },
+    {
+      label: "Composer",
+      items: [
+        { keys: "/", hint: "slash commands (/help /rename /compact /rewind)" },
+        { keys: "↑ / ↓", hint: "prompt history" },
+        { keys: "!", hint: "shell mode (empty composer)" },
+      ],
+    },
+    {
+      label: "Session",
+      items: [
+        { keys: `${mod}+j / ${mod}+k`, hint: "next / previous session" },
+        { keys: `${mod}+n`, hint: "new session" },
+        { keys: `${mod}+t`, hint: "cycle theme" },
+      ],
+    },
+    {
+      label: "Panes",
+      items: [
+        { keys: `${mod}+[ / ${mod}+]`, hint: "collapse / expand artifacts" },
+        { keys: "Page Up / Down", hint: "scroll transcript" },
+        { keys: "font size: 12", hint: "header picker · 12 / 13 / 14 / 16" },
+      ],
+    },
+  ];
+}
 
 type Props = { open: boolean; onClose: () => void };
 
 export function ShortcutsOverlay({ open, onClose }: Props) {
   const [selected, setSelected] = useState(0);
+  const [mod, setMod] = useState("Alt");
+  const groups = useMemo(() => shortcutGroups(mod), [mod]);
+  const flatLen = useMemo(
+    () => groups.reduce((n, g) => n + g.items.length, 0),
+    [groups],
+  );
+
+  useEffect(() => {
+    setMod(isMacClient() ? "Option" : "Alt");
+  }, []);
 
   useEffect(() => {
     if (open) setSelected(0);
@@ -63,18 +80,18 @@ export function ShortcutsOverlay({ open, onClose }: Props) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
         e.stopPropagation();
-        setSelected((i) => (i + 1) % FLAT.length);
+        setSelected((i) => (i + 1) % flatLen);
         return;
       }
       if (e.key === "ArrowUp") {
         e.preventDefault();
         e.stopPropagation();
-        setSelected((i) => (i - 1 + FLAT.length) % FLAT.length);
+        setSelected((i) => (i - 1 + flatLen) % flatLen);
       }
     }
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [open, onClose]);
+  }, [open, onClose, flatLen]);
 
   if (!open) return null;
 
@@ -94,7 +111,7 @@ export function ShortcutsOverlay({ open, onClose }: Props) {
             [x]
           </button>
         </div>
-        {GROUPS.map((g) => (
+        {groups.map((g) => (
           <div key={g.label} className="shortcuts-group">
             <div className="shortcuts-group-label">{g.label}</div>
             {g.items.map((item) => {
