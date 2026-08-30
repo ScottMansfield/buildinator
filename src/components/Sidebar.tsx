@@ -212,6 +212,13 @@ export function Sidebar({
 
   const ownedIds = useMemo(() => new Set(owned.map((p) => p.id)), [owned]);
 
+  useEffect(() => {
+    if (!selectedId) return;
+    const s = sessions.find((row) => row.id === selectedId);
+    if (!s) return;
+    setCollapsed((c) => (c[s.projectId] ? { ...c, [s.projectId]: false } : c));
+  }, [selectedId, sessions]);
+
   const q = search.trim().toLowerCase();
   const match = (s: SessionSummary, projectName: string, cwd: string) => {
     if (!q) return true;
