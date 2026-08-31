@@ -2,15 +2,16 @@
 
 ## Locked decisions (2026-08-28)
 
-1. One machine. HTTPS web UI is the only internet-facing port. Grok ACP
-   binds 127.0.0.1. Local IPC is ACP on loopback
-   (GROK_ACP_URL=http://127.0.0.1:<port>).
+1. One machine. HTTPS web UI (Next.js) is the only internet-facing port.
+   Grok ACP is `grok agent --always-approve serve --bind 127.0.0.1:2419`
+   (loopback WebSocket at `ws://127.0.0.1:2419/ws`, Bearer GROK_AGENT_SECRET).
+   GROK_ACP_URL=ws://127.0.0.1:2419. Caddy must not proxy 2419. ACP is not public.
 2. New session in the UI creates a real SQLite row + sandbox cwd.
    Rename from the UI and via /rename.
 3. Multi-tenant even with one human. Sessions isolated by user.
    Owner can share a session as read-only or read-write. Only the owner
    may delete the session, revoke all shares, or destroy the sandbox.
-   Read-write: prompts, rename, /compact, /rewind. Read-only: chat +
+   Read-write: prompts, rename, /compact, /rewind. Read-only: chat + 
    artifacts.
 4. Projects are sandboxes under projectsRoot()/<userId>/<projectId>/
    (local-dev: data/sandboxes/...; BUILDINATOR_ROOT: $ROOT/projects/...).
@@ -49,12 +50,13 @@ Concurrent sessions (isolation leaks we closed):
   symlink (that is the explicit link). This also stops an old ACP
   session whose grok cwd is still the project root from reading sibling
   session files.
-- One grok stdio child for every session. `session/prompt` is already
-  keyed by ACP session id; overlapping prompts multiplex. Do not spawn
-  one grok process per session and do not globally lock sending across
-  sessions.
-- `--always-approve` is process-wide (spawn flag). The UI picker can
-  stay and is stored per session; changing it does not respawn grok.
+- One grok ACP WebSocket for every UI session (multiplex on sessionId).
+  `session/prompt` is keyed by ACP session id; overlapping prompts multiplex.
+  Do not spawn grok from Next.js, do not use stdio, and do not globally lock
+  sending across sessions. On reconnect: initialize again, reset loaded
+  sessions, then session/load. Do not replay in-flight session/update.
+- `--always-approve` is process-wide (grok-agent.service flag). The UI picker can
+  stay and is stored per session; changing it does not restart grok serve.
 
 /resume and /fork are **not** in-session slashes — they live on the
 session row because they deal with things outside the current session.
@@ -106,8 +108,8 @@ insufficient role is 403. Owner satisfies write and read.
 GrokBuildAdapter is user-scoped. Mock implementation persists index
 mutations to sqlite and keeps transcripts in memory.
 
-RemoteGrokAdapter throws with a pointer at loopback ACP. Never expose
-that port.
+RemoteGrokAdapter throws. Live ACP is the loopback WebSocket sidecar,
+not this stub. Never expose port 2419.
 
 ## Auth
 
@@ -141,7 +143,6 @@ is present. We never infer a tree from timing. `task` still renders as a
 spawn node with no children. `_x.ai/queue/interject` and
 `_x.ai/toggle_plan_mode` are not callable (`-32601`); the composer queue is
 client-side. `session/set_model` `{sessionId, modelId}` and `session/set_mode`
-`{sessionId, modeId}` (effort: low/medium/high) work. Permission is spawn
-`--permission-mode` / `--always-approve` plus `session/new` `_meta.yoloMode` /
-`autoMode`. One shared grok child serves every session; we do not respawn it
-to change permission.
+`{sessionId, modeId}` (effort: low/medium/high) work. Permission is `grok agent --always-approve serve` plus `session/new` `_meta.yoloMode` /
+`autoMode`. One shared grok serve WebSocket handles every session; we do not
+restart it to change permission.
