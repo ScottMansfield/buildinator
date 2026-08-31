@@ -302,7 +302,7 @@ function compactTranscriptSeed(t: Transcript, currentPrompt: string): string {
   const blocks: string[] = [];
   for (const m of recent) {
     let text = m.content.trim();
-    if (text.length > SEED_MSG_CHARS) text = text.slice(0, SEED_MSG_CHARS) + "\u2026";
+    if (text.length > SEED_MSG_CHARS) text = text.slice(0, SEED_MSG_CHARS) + "…";
     blocks.push(`${m.role === "user" ? "USER" : "ASSISTANT"}: ${text}`);
   }
   let body = blocks.join("\n\n");
@@ -847,7 +847,7 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
     requireAccountWrite(user.role);
     const trimmed = name.trim();
     if (!trimmed || trimmed.length > 40) {
-      throw new AclError(400, "project name must be 1\u201340 characters");
+      throw new AclError(400, "project name must be 1–40 characters");
     }
     if (!/^[A-Za-z0-9][A-Za-z0-9 _.-]*$/.test(trimmed)) {
       throw new AclError(400, "project name: letters, numbers, space, . _ -");
