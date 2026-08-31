@@ -8,6 +8,7 @@ import {
   findOwnedProjectByName,
   getProjectRow,
   getSessionRow,
+  sessionIdForAcpSession,
   insertProject,
   insertSession,
   insertShare,
@@ -247,6 +248,13 @@ function resolveAcpSessionId(sessionId: string, t: Transcript): string | undefin
   const fromDb = trimId(getSessionRow(sessionId)?.acp_session_id);
   const id = fromTranscript || fromDb;
   if (!id) return undefined;
+  const stolen = sessionIdForAcpSession(id, sessionId);
+  if (stolen) {
+    console.error("[acp] refusing shared acp_session_id", id, "owned by", stolen, "not", sessionId);
+    delete t.acpSessionId;
+    if (fromDb) updateSessionMeta(sessionId, { acpSessionId: null });
+    return undefined;
+  }
   if (t.acpSessionId !== id) t.acpSessionId = id;
   if (fromDb !== id) {
     updateSessionMeta(sessionId, { acpSessionId: id });
@@ -255,8 +263,16 @@ function resolveAcpSessionId(sessionId: string, t: Transcript): string | undefin
 }
 
 function persistAcpSessionId(sessionId: string, t: Transcript, acpId: string | null): void {
-  if (acpId) t.acpSessionId = acpId;
-  else delete t.acpSessionId;
+  if (acpId) {
+    const stolen = sessionIdForAcpSession(acpId, sessionId);
+    if (stolen) {
+      console.error("[acp] persist skipped, acp_session_id already bound", acpId, stolen);
+      return;
+    }
+    t.acpSessionId = acpId;
+  } else {
+    delete t.acpSessionId;
+  }
   updateSessionMeta(sessionId, { acpSessionId: acpId });
 }
 
