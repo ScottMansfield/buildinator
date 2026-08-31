@@ -11,7 +11,7 @@
 3. Multi-tenant even with one human. Sessions isolated by user.
    Owner can share a session as read-only or read-write. Only the owner
    may delete the session, revoke all shares, or destroy the sandbox.
-   Read-write: prompts, rename, /compact, /rewind. Read-only: chat + 
+   Read-write: prompts, rename, /compact, /rewind. Read-only: chat +
    artifacts.
 4. Projects are sandboxes under projectsRoot()/<userId>/<projectId>/
    (local-dev: data/sandboxes/...; BUILDINATOR_ROOT: $ROOT/projects/...).
