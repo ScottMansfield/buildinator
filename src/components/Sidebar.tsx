@@ -423,7 +423,11 @@ export function Sidebar({
                     <button
                       type="button"
                       className="btn-quiet"
-                      onClick={() => onNew(project.id)}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onNew(project.id);
+                      }}
                     >
                       + session
                     </button>
