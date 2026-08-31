@@ -197,13 +197,28 @@ class AcpClient {
     if (acpId && sandbox) this.sessionSandboxes.set(acpId, sandbox);
   }
 
+  private acpSessionIdFromParams(params: unknown): string {
+    if (!params || typeof params !== "object") return "";
+    const o = params as Record<string, unknown>;
+    if (typeof o.sessionId === "string" && o.sessionId.trim()) return o.sessionId.trim();
+    const meta = o._meta;
+    if (meta && typeof meta === "object") {
+      const m = meta as Record<string, unknown>;
+      if (typeof m.sessionId === "string" && m.sessionId.trim()) return m.sessionId.trim();
+    }
+    return "";
+  }
+
   private sandboxFor(params: unknown): string | null {
-    const sid =
-      params && typeof params === "object" && typeof (params as { sessionId?: unknown }).sessionId === "string"
-        ? (params as { sessionId: string }).sessionId.trim()
-        : "";
-    if (!sid) return null;
-    return this.sessionSandboxes.get(sid) ?? null;
+    const sid = this.acpSessionIdFromParams(params);
+    if (sid) return this.sessionSandboxes.get(sid) ?? null;
+    // Grok sometimes omits sessionId on fs/terminal. Only guess when a single
+    // prompt is in flight so two concurrent turns cannot mix sandboxes.
+    if (this.promptWaiters.size === 1) {
+      const only = this.promptWaiters.keys().next().value;
+      if (typeof only === "string") return this.sessionSandboxes.get(only) ?? null;
+    }
+    return null;
   }
 
   private jailOrError(id: number | string, params: unknown, candidate: string, label: string): string | null {
@@ -673,7 +688,7 @@ class AcpClient {
     if (cwd) this.bindSandbox(acpId, cwd);
     if (this.hasLoaded(acpId)) return;
     try {
-      await this.request("session/load", { sessionId: acpId });
+      await this.request("session/load", cwd ? { sessionId: acpId, cwd } : { sessionId: acpId });
       this.markLoaded(acpId);
       if (cwd) this.bindSandbox(acpId, cwd);
     } catch (err) {
@@ -693,15 +708,14 @@ class AcpClient {
     onUpdate: (update: AcpUpdate) => void,
   ): Promise<{ stopReason?: string }> {
     await this.ensureProcess();
-    const prev = this.updateHandlers.get(acpId);
-    this.updateHandlers.set(acpId, (update) => {
+    const handler = (update: AcpUpdate) => {
       try {
         onUpdate(update);
       } catch (err) {
         console.error("ACP onUpdate failed", err);
       }
-      prev?.(update);
-    });
+    };
+    this.updateHandlers.set(acpId, handler);
     const id = this.nextId++;
     this.promptWaiters.set(acpId, id);
     try {
@@ -716,8 +730,7 @@ class AcpClient {
       return { stopReason };
     } finally {
       if (this.promptWaiters.get(acpId) === id) this.promptWaiters.delete(acpId);
-      if (prev) this.updateHandlers.set(acpId, prev);
-      else this.updateHandlers.delete(acpId);
+      if (this.updateHandlers.get(acpId) === handler) this.updateHandlers.delete(acpId);
     }
   }
 
