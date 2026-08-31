@@ -583,25 +583,30 @@ export function AppShell({ user }: Props) {
     });
     creatingRef.current = pending;
     void (async () => {
-      const gen = selectSession(null);
+      const previous = selectedRef.current;
       try {
         const data = await api<{ session: SessionDetail }>("/api/sessions", {
           method: "POST",
           body: JSON.stringify({ projectId }),
         });
-        if (selectionStale(gen)) {
-          finish(data.session.id);
-          return;
+        const id = data.session.id;
+        const userMoved =
+          selectedRef.current != null &&
+          selectedRef.current !== previous &&
+          selectedRef.current !== id;
+        if (!userMoved) {
+          const applied = selectSession(id, data.session);
+          await refreshLists();
+          if (!selectionStale(applied, id)) {
+            setNotice("Created session.");
+            requestAnimationFrame(() => focusComposer());
+          }
+        } else {
+          await refreshLists();
         }
-        const applied = selectSession(data.session.id, data.session);
-        await refreshLists();
-        if (!selectionStale(applied, data.session.id)) {
-          setNotice("Created session.");
-          requestAnimationFrame(() => focusComposer());
-        }
-        finish(data.session.id);
+        finish(id);
       } catch (err) {
-        if (!selectionStale(gen)) {
+        if (selectedRef.current === previous) {
           setNotice(err instanceof Error ? err.message : "create session failed");
         }
         finish(null);
@@ -906,11 +911,18 @@ export function AppShell({ user }: Props) {
   }
 
   async function onCommand(text: string) {
+    const trimmed = text.trim();
     if (creatingRef.current) {
       const created = await creatingRef.current;
+      if (!trimmed.startsWith("/") && created) {
+        mutateSlot(created, (s) => {
+          s.draft = "";
+        });
+        await sendPrompt(created, trimmed);
+        return;
+      }
       if (!created && !selectedRef.current) return;
     }
-    const trimmed = text.trim();
     const sid = selectedRef.current;
     if (!trimmed.startsWith("/")) {
       if (sid) {
