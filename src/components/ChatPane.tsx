@@ -155,16 +155,9 @@ export function ChatPane({
     running && resolved.lastEventAt
       ? formatUpdatedAgo(now - resolved.lastEventAt)
       : null;
-  const chipClass =
-    session?.status === "error" && !running
-      ? "error"
-      : resolved.phase;
+  const chipClass = resolved.phase;
   const chipLabel =
-    session?.status === "error" && !running
-      ? "error"
-      : resolved.phase === "idle"
-        ? "idle"
-        : `${resolved.phase} ${elapsed}`;
+    resolved.phase === "idle" ? "idle" : `${resolved.phase} ${elapsed}`;
   const liveThought =
     resolved.phase === "thinking"
       ? [...(session?.messages ?? [])].reverse().find((m) => m.role === "thought")?.id ??

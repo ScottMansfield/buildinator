@@ -65,6 +65,9 @@ export function isUntitled(title: string): boolean {
 const TITLE_FILLER =
   /^(?:(?:please|hey|hi|hello|yo)[,!]?\s+|(?:can|could|would|will)\s+you(?:\s+please)?\s+|help\s+me(?:\s+to)?\s+|i(?:['’]d|\s+would)\s+like\s+(?:you\s+to\s+)?|i\s+(?:want|need)(?:\s+you\s+to)?\s+)/i;
 
+const TITLE_VERB =
+  /^(?:(?:check|look\s+at|show|get|find)(?:\s+me)?|tell\s+me)\s+(?:the\s+current\s+)?/i;
+
 export function titleFromPrompt(prompt: string): string {
   const line =
     prompt
@@ -76,8 +79,8 @@ export function titleFromPrompt(prompt: string): string {
     .replace(/^[`'"]+|[`'"]+$/g, "")
     .replace(/\s+/g, " ")
     .trim();
-  for (let i = 0; i < 3; i++) {
-    const next = cleaned.replace(TITLE_FILLER, "").trim();
+  for (let i = 0; i < 4; i++) {
+    const next = cleaned.replace(TITLE_FILLER, "").replace(TITLE_VERB, "").trim();
     if (next === cleaned) break;
     cleaned = next;
   }
