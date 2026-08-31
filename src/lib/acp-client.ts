@@ -688,7 +688,7 @@ class AcpClient {
     if (cwd) this.bindSandbox(acpId, cwd);
     if (this.hasLoaded(acpId)) return;
     try {
-      await this.request("session/load", cwd ? { sessionId: acpId, cwd } : { sessionId: acpId });
+      await this.request("session/load", { sessionId: acpId });
       this.markLoaded(acpId);
       if (cwd) this.bindSandbox(acpId, cwd);
     } catch (err) {
