@@ -9,6 +9,32 @@ export function grokAcpEnabled(): boolean {
   return (process.env.GROK_ADAPTER ?? "mock") === "acp";
 }
 
+const DEFAULT_ACP_WS = "ws://127.0.0.1:2419/ws";
+
+/**
+ * Loopback WebSocket URL for `grok agent serve` (`/ws`).
+ * Stale http(s) GROK_ACP_URL values (e.g. http://127.0.0.1:8080) are ignored.
+ * `ws://127.0.0.1:2419` gains `/ws`; a path that already includes `/ws` is kept.
+ */
+export function grokAcpWsUrl(): string {
+  const raw = (process.env.GROK_ACP_URL ?? "").trim();
+  if (!raw || /^https?:\/\//i.test(raw)) return DEFAULT_ACP_WS;
+  try {
+    const u = new URL(raw);
+    if (u.protocol !== "ws:" && u.protocol !== "wss:") return DEFAULT_ACP_WS;
+    if (!u.pathname || u.pathname === "/") u.pathname = "/ws";
+    return u.href;
+  } catch {
+    return DEFAULT_ACP_WS;
+  }
+}
+
+/** Bearer token for grok agent serve. Prefer env; never put --secret on argv. */
+export function grokAgentSecret(): string {
+  return (process.env.GROK_AGENT_SECRET ?? "").trim();
+}
+
+
 export function grokCliConfigured(): boolean {
   return grokCliEnabled();
 }

@@ -1,0 +1,20 @@
+[Unit]
+Description=Grok ACP WebSocket (loopback)
+After=network.target
+Before=buildinator.service
+
+[Service]
+User=buildinator
+Group=buildinator
+Environment=GROK_BIN=/mnt/buildinator/grok/bin/grok
+EnvironmentFile=-/opt/buildinator/.env
+WorkingDirectory=/opt/buildinator
+# --always-approve is an agent flag (before serve). Secret from GROK_AGENT_SECRET, not argv.
+ExecStart=/bin/sh -c 'exec "${GROK_BIN:-/mnt/buildinator/grok/bin/grok}" agent --always-approve serve --bind 127.0.0.1:2419'
+Restart=always
+RestartSec=2
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
