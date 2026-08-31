@@ -166,6 +166,31 @@ function migrate(db: InstanceType<typeof Database>) {
     "UPDATE users SET role = 'admin' WHERE username = 'scott' COLLATE NOCASE",
   ).run();
 
+  // One grok ACP thread per buildinator session. Duplicate ids would mix
+  // session/update handlers. Keep the oldest row; blank the rest, then unique.
+  const dupAcp = db
+    .prepare(
+      `SELECT acp_session_id AS id FROM sessions
+       WHERE acp_session_id IS NOT NULL AND trim(acp_session_id) != ''
+       GROUP BY acp_session_id HAVING COUNT(*) > 1`,
+    )
+    .all() as Array<{ id: string }>;
+  for (const d of dupAcp) {
+    const rows = db
+      .prepare(
+        `SELECT id FROM sessions WHERE acp_session_id = ? ORDER BY created_at ASC, id ASC`,
+      )
+      .all(d.id) as Array<{ id: string }>;
+    for (const extra of rows.slice(1)) {
+      db.prepare("UPDATE sessions SET acp_session_id = NULL WHERE id = ?").run(extra.id);
+    }
+  }
+  db.exec(
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_acp_session_id
+     ON sessions(acp_session_id)
+     WHERE acp_session_id IS NOT NULL AND trim(acp_session_id) != ''`,
+  );
+
   const count = db.prepare("SELECT COUNT(*) AS n FROM users").get() as { n: number };
   if (count.n > 0) {
     deleteGuestUser(db);
@@ -504,6 +529,20 @@ export function toProject(row: ProjectRow, userId: string): Project {
 
 export function getSessionRow(id: string): SessionRow | undefined {
   return getDb().prepare("SELECT * FROM sessions WHERE id = ?").get(id) as SessionRow | undefined;
+}
+
+/** Other session already bound to this ACP id, if any. */
+export function sessionIdForAcpSession(acpSessionId: string, exceptSessionId?: string): string | undefined {
+  const id = acpSessionId.trim();
+  if (!id) return undefined;
+  const row = exceptSessionId
+    ? (getDb()
+        .prepare("SELECT id FROM sessions WHERE acp_session_id = ? AND id != ?")
+        .get(id, exceptSessionId) as { id: string } | undefined)
+    : (getDb()
+        .prepare("SELECT id FROM sessions WHERE acp_session_id = ?")
+        .get(id) as { id: string } | undefined);
+  return row?.id;
 }
 
 export function shareRoleFor(sessionId: string, userId: string): ShareRole | null {
