@@ -1,6 +1,7 @@
-import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
-import { grokPaths } from "./grok-cli";
+import WebSocket from "ws";
+import { grokAgentSecret, grokAcpWsUrl, grokPaths } from "./grok-cli";
 import { newId } from "./ids";
 import { jailSessionPath } from "./sandbox";
 import { sessionNewMeta } from "./session-prefs";
@@ -140,17 +141,19 @@ type Term = {
 };
 
 class AcpClient {
-  private child: ChildProcessWithoutNullStreams | null = null;
+  private ws: WebSocket | null = null;
   private buf = "";
   private nextId = 1;
   private pending = new Map<number, Pending>();
   private initialized = false;
   private starting: Promise<void> | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private backoffMs = 250;
   private updateHandlers = new Map<string, (update: AcpUpdate) => void>();
   private terminals = new Map<string, Term>();
   /** JSON-RPC id of the in-flight session/prompt per ACP session. */
   private promptWaiters = new Map<string, number>();
-  /** ACP session ids loaded in THIS grok child since last spawn. */
+  /** ACP session ids loaded on THIS websocket since last connect. */
   private loadedSessions = new Set<string>();
   /** acpSessionId → session sandbox absolute path. */
   private sessionSandboxes = new Map<string, string>();
@@ -174,9 +177,7 @@ class AcpClient {
   }
 
   private processLive(): boolean {
-    return Boolean(
-      this.child && this.initialized && this.child.exitCode === null && !this.child.killed,
-    );
+    return Boolean(this.ws && this.initialized && this.ws.readyState === WebSocket.OPEN);
   }
 
   hasLoaded(acpId: string): boolean {
@@ -236,52 +237,92 @@ class AcpClient {
   }
 
   async ensureProcess(): Promise<void> {
-    if (this.child && this.initialized && this.child.exitCode === null && !this.child.killed) {
-      return;
-    }
+    if (this.processLive()) return;
     if (this.starting) return this.starting;
     this.starting = this.boot();
     try {
       await this.starting;
+      this.backoffMs = 250;
+    } catch (err) {
+      throw err;
     } finally {
       this.starting = null;
+      if (!this.processLive()) this.scheduleReconnect();
     }
   }
 
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
+
+  private scheduleReconnect(): void {
+    if (this.starting || this.reconnectTimer || this.processLive()) return;
+    const wait = this.backoffMs;
+    this.backoffMs = Math.min(this.backoffMs * 2, 10_000);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      void this.ensureProcess().catch((err) => {
+        console.error("[acp] websocket reconnect failed", err);
+      });
+    }, wait);
+  }
+
+  private frameText(data: WebSocket.RawData): string {
+    if (typeof data === "string") return data;
+    if (Buffer.isBuffer(data)) return data.toString("utf8");
+    if (Array.isArray(data)) return Buffer.concat(data).toString("utf8");
+    return Buffer.from(data).toString("utf8");
+  }
+
   private async boot(): Promise<void> {
-    this.teardown(new Error("ACP respawn"));
-    const { home, grokHome, bin, path } = grokPaths();
-    const child = spawn(bin, ["agent", "--always-approve", "stdio"], {
-      cwd: home,
-      env: {
-        ...process.env,
-        HOME: home,
-        GROK_HOME: grokHome,
-        PATH: path,
-      },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    this.child = child;
+    this.clearReconnectTimer();
+    this.teardown(new Error("ACP reconnect"));
+    const url = grokAcpWsUrl();
+    const secret = grokAgentSecret();
+    const headers: Record<string, string> = {};
+    if (secret) headers.Authorization = `Bearer ${secret}`;
+    const sock = new WebSocket(url, { headers });
+    this.ws = sock;
     this.buf = "";
     this.initialized = false;
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => this.onStdout(chunk));
-    child.stderr.on("data", (chunk: string) => {
-      const text = String(chunk).trim();
-      if (text) console.error("[acp stderr]", text);
+    this.forgetLoaded();
+    sock.on("message", (data, isBinary) => {
+      if (this.ws !== sock) return;
+      if (isBinary) return;
+      this.onFrame(this.frameText(data));
     });
-    child.on("error", (err) => {
-      this.failAll(err);
+    sock.on("error", (err) => {
+      if (this.ws !== sock) return;
+      console.error("[acp] websocket error", err);
+    });
+    sock.on("close", () => {
+      if (this.ws !== sock) return;
+      this.ws = null;
       this.initialized = false;
       this.forgetLoaded();
-      this.child = null;
+      this.failAll(new Error("ACP websocket closed"));
+      this.scheduleReconnect();
     });
-    child.on("close", (code, signal) => {
-      this.failAll(new Error(`grok ACP exited (${code ?? signal ?? "unknown"})`));
-      this.initialized = false;
-      this.forgetLoaded();
-      if (this.child === child) this.child = null;
+    await new Promise<void>((resolve, reject) => {
+      if (sock.readyState === WebSocket.OPEN) {
+        resolve();
+        return;
+      }
+      const onOpen = () => {
+        sock.off("open", onOpen);
+        sock.off("error", onErr);
+        resolve();
+      };
+      const onErr = (err: Error) => {
+        sock.off("open", onOpen);
+        sock.off("error", onErr);
+        reject(err);
+      };
+      sock.on("open", onOpen);
+      sock.on("error", onErr);
     });
     await this.request("initialize", {
       protocolVersion: 1,
@@ -296,19 +337,8 @@ class AcpClient {
 
   private teardown(reason: Error): void {
     this.failAll(reason);
-    if (this.child) {
-      try {
-        this.child.stdin.end();
-      } catch {
-        // ignore
-      }
-      try {
-        this.child.kill("SIGTERM");
-      } catch {
-        // ignore
-      }
-    }
-    this.child = null;
+    const ws = this.ws;
+    this.ws = null;
     this.initialized = false;
     this.buf = "";
     this.updateHandlers.clear();
@@ -321,6 +351,13 @@ class AcpClient {
     }
     this.terminals.clear();
     this.forgetLoaded();
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+      try {
+        ws.close();
+      } catch {
+        // ignore
+      }
+    }
   }
 
   private failAll(err: Error): void {
@@ -329,21 +366,41 @@ class AcpClient {
     for (const p of pending) p.reject(err);
   }
 
-  private onStdout(chunk: string): void {
-    this.buf += chunk;
+  private onFrame(chunk: string): void {
+    const text = chunk.replace(/^\uFEFF/, "");
+    if (!text) return;
+    try {
+      this.onMessage(JSON.parse(text) as Record<string, unknown>);
+      this.buf = "";
+      return;
+    } catch {
+      // one JSON per frame is normal; also tolerate newline-concatenated frames
+    }
+    this.buf += text;
+    if (this.buf.includes("\n")) {
+      this.drainNewlineFrames();
+      return;
+    }
+    try {
+      this.onMessage(JSON.parse(this.buf) as Record<string, unknown>);
+      this.buf = "";
+    } catch {
+      if (this.buf.length > 4_000_000) this.buf = "";
+    }
+  }
+
+  private drainNewlineFrames(): void {
     for (;;) {
       const nl = this.buf.indexOf("\n");
       if (nl < 0) break;
       const line = this.buf.slice(0, nl).replace(/\r$/, "");
       this.buf = this.buf.slice(nl + 1);
       if (!line.trim()) continue;
-      let msg: Record<string, unknown>;
       try {
-        msg = JSON.parse(line) as Record<string, unknown>;
+        this.onMessage(JSON.parse(line) as Record<string, unknown>);
       } catch {
         continue;
       }
-      this.onMessage(msg);
     }
   }
 
@@ -436,8 +493,8 @@ class AcpClient {
   }
 
   private write(msg: unknown): void {
-    if (!this.child?.stdin.writable) return;
-    this.child.stdin.write(JSON.stringify(msg) + "\n");
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    this.ws.send(JSON.stringify(msg));
   }
 
   private respond(id: number | string, result: unknown): void {
@@ -648,20 +705,17 @@ class AcpClient {
   }
 
   private requestWithId(id: number, method: string, params?: unknown): Promise<unknown> {
-    if (!this.child || !this.child.stdin.writable) {
-      return Promise.reject(new Error("ACP process is not running"));
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return Promise.reject(new Error("ACP websocket is not open"));
     }
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
-      this.child!.stdin.write(
-        JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n",
-        (err) => {
-          if (err) {
-            this.pending.delete(id);
-            reject(err);
-          }
-        },
-      );
+      try {
+        this.ws!.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
+      } catch (err) {
+        this.pending.delete(id);
+        reject(err instanceof Error ? err : new Error(String(err)));
+      }
     });
   }
 
@@ -697,7 +751,7 @@ class AcpClient {
         if (cwd) this.bindSandbox(acpId, cwd);
         return;
       }
-      // Do not kill the grok child on a failed load.
+      // Do not close the ACP websocket on a failed load.
       throw err;
     }
   }
@@ -740,7 +794,7 @@ class AcpClient {
     if (id == null) return;
     // Notification has no RPC reply. grok usually completes session/prompt with
     // stopReason cancelled; if it ignores cancel, unstick the waiter so the
-    // next queued turn is not deadlocked. Do not kill the ACP child.
+    // next queued turn is not deadlocked. Do not close the ACP websocket.
     setTimeout(() => {
       const p = this.pending.get(id);
       if (!p) return;
