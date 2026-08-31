@@ -227,6 +227,7 @@ export function AppShell({ user }: Props) {
   const selectedRef = useRef<string | null>(null);
   const selectGen = useRef(0);
   const creatingRef = useRef<Promise<string | null> | null>(null);
+  const streamsRef = useRef(new Map<string, () => void>());
   const sessionsRef = useRef(sessions);
   sessionsRef.current = sessions;
   const sendPromptRef = useRef<(sid: string, text: string, fromQueue?: boolean) => Promise<void>>(
@@ -360,161 +361,179 @@ export function AppShell({ user }: Props) {
     [selectSession, loadSession],
   );
 
-  useEffect(() => {
-    if (!selectedId) return;
-    const sid = selectedId;
-    const gen = selectGen.current;
-    let closed = false;
-    let es: EventSource | null = null;
-    let retry = 0;
-    let retryTimer: ReturnType<typeof setTimeout> | undefined;
-    const applyActivity = (phase: SessionActivity["phase"]) => {
-      mutateSlot(sid, (s) => {
-        s.activity = bumpActivity(s.activity, phase);
-      });
-    };
-    const handleEvent = (ev: MessageEvent) => {
-      if (!ev.data || ev.data === ": connected") return;
-      let event: SessionStreamEvent;
-      try {
-        event = JSON.parse(ev.data) as SessionStreamEvent;
-      } catch {
-        return;
-      }
-      if (event.type === "message") {
-        applyActivity("writing");
-        setDetail((prev) => {
-          const stamped = stampLastThoughtEnd(prev, sid);
-          return upsertStreamMessage(stamped, sid, event);
-        });
-      } else if (event.type === "thought") {
-        applyActivity("thinking");
-        setDetail((prev) =>
-          upsertStreamMessage(prev, sid, { id: event.id, role: "thought", content: event.content }),
-        );
-      } else if (event.type === "tool") {
-        applyActivity("working");
-        setDetail((prev) => {
-          const base = stampLastThoughtEnd(prev, sid);
-          if (!base || base.id !== sid) return base;
-          const idx = base.toolCalls.findIndex((t) => t.id === event.tool.id);
-          const toolCalls = base.toolCalls.slice();
-          if (idx >= 0) toolCalls[idx] = mergeOneTool(toolCalls[idx], event.tool);
-          else toolCalls.push(mergeOneTool(undefined, event.tool));
-          return { ...base, toolCalls };
-        });
-      } else if (event.type === "activity") {
-        applyActivity(event.phase);
-      } else if (event.type === "status") {
-        if (event.status === "running") {
-          mutateSlot(sid, (s) => {
-            s.activity =
-              s.activity.phase === "idle"
-                ? bumpActivity(s.activity, "thinking")
-                : { ...s.activity, lastEventAt: Date.now() };
-          });
-        } else {
-          applyActivity("idle");
-        }
-        setSessions((list) =>
-          list.map((row) => (row.id === sid ? { ...row, status: event.status } : row)),
-        );
-        setDetail((prev) => (prev && prev.id === sid ? { ...prev, status: event.status } : prev));
-      } else if (event.type === "artifact") {
-        setDetail((prev) => {
-          if (!prev || prev.id !== sid) return prev;
-          const a = event.artifact;
-          const idx = prev.artifacts.findIndex(
-            (x) =>
-              x.id === a.id ||
-              (x.kind === "file" && a.kind === "file" && x.title === a.title),
-          );
-          const artifacts = prev.artifacts.slice();
-          if (idx >= 0) artifacts[idx] = a;
-          else artifacts.push(a);
-          return { ...prev, artifacts };
-        });
-      } else if (event.type === "title") {
-        setDetail((prev) => (prev && prev.id === sid ? { ...prev, title: event.title } : prev));
-        setSessions((list) =>
-          list.map((s) => (s.id === sid ? { ...s, title: event.title } : s)),
-        );
-      } else if (event.type === "done") {
-        applyActivity("idle");
-        void (async () => {
-          try {
-            if (selectedRef.current === sid && !selectionStale(gen, sid)) {
-              await loadSession(sid, { reconcile: false, gen });
-            }
-            if (selectionStale(gen, sid)) {
-              await refreshLists();
-              if (getSlot(sid).sending) onTurnEndedRef.current(sid, true);
-              return;
-            }
-            await refreshLists();
-          } catch {
-            // keep live state if reconcile fails
-          }
-          if (getSlot(sid).sending) onTurnEndedRef.current(sid, true);
-        })();
-      } else if (event.type === "error") {
-        applyActivity("idle");
+  const dropStream = useCallback((sid: string) => {
+    const close = streamsRef.current.get(sid);
+    if (!close) return;
+    close();
+    streamsRef.current.delete(sid);
+  }, []);
+
+  const ensureStream = useCallback(
+    (sid: string) => {
+      if (!sid || streamsRef.current.has(sid)) return;
+      let closed = false;
+      let es: EventSource | null = null;
+      let retry = 0;
+      let retryTimer: ReturnType<typeof setTimeout> | undefined;
+      const applyActivity = (phase: SessionActivity["phase"]) => {
         mutateSlot(sid, (s) => {
-          s.notice = event.message;
+          s.activity = bumpActivity(s.activity, phase);
         });
-        setDetail((prev) => (prev && prev.id === sid ? { ...prev, status: "error" } : prev));
-        void (async () => {
-          try {
-            if (selectedRef.current === sid && !selectionStale(gen, sid)) {
-              await loadSession(sid, { reconcile: false, gen });
-            }
-            if (selectionStale(gen, sid)) {
-              await refreshLists();
-              if (getSlot(sid).sending) onTurnEndedRef.current(sid, true);
-              return;
-            }
-            await refreshLists();
-          } catch {
-            // keep live state if reconcile fails
-          }
-          if (getSlot(sid).sending) onTurnEndedRef.current(sid, true);
-        })();
-      }
-    };
-    const refetch = async () => {
-      try {
-        const data = await api<{ session: SessionDetail }>(`/api/sessions/${sid}`);
-        if (selectionStale(gen, sid)) return;
-        setDetail((prev) => mergeStreamDetail(prev, data.session));
-      } catch {
-        // live stream still authoritative
-      }
-    };
-    const connect = () => {
-      if (closed) return;
-      es = new EventSource(`/api/sessions/${sid}/events`);
-      es.addEventListener("message", handleEvent);
-      es.onopen = () => {
-        retry = 0;
-        void refetch();
       };
-      es.onerror = () => {
+      const settleTurn = async () => {
+        try {
+          if (selectedRef.current === sid) {
+            await loadSession(sid, { reconcile: false, gen: selectGen.current });
+          }
+          await refreshLists();
+        } catch {
+          // keep live state if reconcile fails
+        }
+        if (getSlot(sid).sending) onTurnEndedRef.current(sid, true);
+        if (selectedRef.current !== sid && !getSlot(sid).sending) dropStream(sid);
+      };
+      const handleEvent = (ev: MessageEvent) => {
+        if (closed) return;
+        if (!ev.data || ev.data === ": connected") return;
+        let event: SessionStreamEvent;
+        try {
+          event = JSON.parse(ev.data) as SessionStreamEvent;
+        } catch {
+          return;
+        }
+        if (event.type === "message") {
+          applyActivity("writing");
+          setDetail((prev) => {
+            const stamped = stampLastThoughtEnd(prev, sid);
+            return upsertStreamMessage(stamped, sid, event);
+          });
+        } else if (event.type === "thought") {
+          applyActivity("thinking");
+          setDetail((prev) =>
+            upsertStreamMessage(prev, sid, { id: event.id, role: "thought", content: event.content }),
+          );
+        } else if (event.type === "tool") {
+          applyActivity("working");
+          setDetail((prev) => {
+            const base = stampLastThoughtEnd(prev, sid);
+            if (!base || base.id !== sid) return base;
+            const idx = base.toolCalls.findIndex((t) => t.id === event.tool.id);
+            const toolCalls = base.toolCalls.slice();
+            if (idx >= 0) toolCalls[idx] = mergeOneTool(toolCalls[idx], event.tool);
+            else toolCalls.push(mergeOneTool(undefined, event.tool));
+            return { ...base, toolCalls };
+          });
+        } else if (event.type === "activity") {
+          applyActivity(event.phase);
+        } else if (event.type === "status") {
+          if (event.status === "running") {
+            mutateSlot(sid, (s) => {
+              s.activity =
+                s.activity.phase === "idle"
+                  ? bumpActivity(s.activity, "thinking")
+                  : { ...s.activity, lastEventAt: Date.now() };
+            });
+          } else {
+            applyActivity("idle");
+          }
+          setSessions((list) =>
+            list.map((row) => (row.id === sid ? { ...row, status: event.status } : row)),
+          );
+          setDetail((prev) => (prev && prev.id === sid ? { ...prev, status: event.status } : prev));
+        } else if (event.type === "artifact") {
+          setDetail((prev) => {
+            if (!prev || prev.id !== sid) return prev;
+            const a = event.artifact;
+            const idx = prev.artifacts.findIndex(
+              (x) =>
+                x.id === a.id ||
+                (x.kind === "file" && a.kind === "file" && x.title === a.title),
+            );
+            const artifacts = prev.artifacts.slice();
+            if (idx >= 0) artifacts[idx] = a;
+            else artifacts.push(a);
+            return { ...prev, artifacts };
+          });
+        } else if (event.type === "title") {
+          setDetail((prev) => (prev && prev.id === sid ? { ...prev, title: event.title } : prev));
+          setSessions((list) =>
+            list.map((s) => (s.id === sid ? { ...s, title: event.title } : s)),
+          );
+        } else if (event.type === "done") {
+          applyActivity("idle");
+          void settleTurn();
+        } else if (event.type === "error") {
+          applyActivity("idle");
+          mutateSlot(sid, (s) => {
+            s.notice = event.message;
+          });
+          setDetail((prev) => (prev && prev.id === sid ? { ...prev, status: "error" } : prev));
+          void settleTurn();
+        }
+      };
+      const refetch = async (reconnect = false) => {
+        try {
+          const data = await api<{ session: SessionDetail }>(`/api/sessions/${sid}`);
+          if (closed) return;
+          if (selectedRef.current === sid) {
+            setDetail((prev) => mergeStreamDetail(prev, data.session));
+          }
+          // First onopen races the prompt POST (GET still idle). Only settle
+          // a stuck sending flag after a reconnect, when `done` may have been missed.
+          if (
+            reconnect &&
+            getSlot(sid).sending &&
+            data.session.status !== "running"
+          ) {
+            onTurnEndedRef.current(sid, true);
+            if (selectedRef.current !== sid && !getSlot(sid).sending) dropStream(sid);
+          }
+        } catch {
+          // live stream still authoritative
+        }
+      };
+      const connect = () => {
+        if (closed) return;
+        es = new EventSource(`/api/sessions/${sid}/events`);
+        es.addEventListener("message", handleEvent);
+        es.onopen = () => {
+          const reconnect = retry > 0;
+          retry = 0;
+          void refetch(reconnect);
+        };
+        es.onerror = () => {
+          es?.close();
+          es = null;
+          if (closed) return;
+          const delay = Math.min(8000, 500 * 2 ** retry);
+          retry += 1;
+          retryTimer = setTimeout(connect, delay);
+        };
+      };
+      connect();
+      streamsRef.current.set(sid, () => {
+        closed = true;
+        if (retryTimer) clearTimeout(retryTimer);
         es?.close();
         es = null;
-        if (closed) return;
-        const delay = Math.min(8000, 500 * 2 ** retry);
-        retry += 1;
-        retryTimer = setTimeout(connect, delay);
-      };
-    };
-    connect();
-    return () => {
-      closed = true;
-      if (retryTimer) clearTimeout(retryTimer);
-      es?.close();
-    };
-  }, [selectedId, loadSession, refreshLists]);
+      });
+    },
+    [loadSession, refreshLists, dropStream],
+  );
 
+  useEffect(() => {
+    if (selectedId) ensureStream(selectedId);
+    return () => {
+      if (selectedId && !getSlot(selectedId).sending) dropStream(selectedId);
+    };
+  }, [selectedId, ensureStream, dropStream]);
+
+  useEffect(() => {
+    return () => {
+      for (const close of streamsRef.current.values()) close();
+      streamsRef.current.clear();
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -667,7 +686,10 @@ export function AppShell({ user }: Props) {
   }
 
   function drainQueue(sid: string, reappend = false) {
-    const leftover = [...getSlot(sid).queue];
+    const live = getSlot(sid);
+    if (!live.sending) return;
+    live.sending = false;
+    const leftover = [...live.queue];
     if (reappend && leftover.length && selectedRef.current === sid) {
       const now = new Date().toISOString();
       setDetail((prev) => {
@@ -695,6 +717,7 @@ export function AppShell({ user }: Props) {
       }
     });
     if (next) void sendPromptRef.current(sid, next, true);
+    else if (selectedRef.current !== sid) dropStream(sid);
   }
   onTurnEndedRef.current = (sid: string, reappend = false) => drainQueue(sid, reappend);
 
@@ -717,6 +740,7 @@ export function AppShell({ user }: Props) {
       s.activity = bumpActivity(s.activity, "thinking");
       s.notice = s.queue.length ? `grok running · ${s.queue.length} queued` : null;
     });
+    ensureStream(sid);
     if (!fromQueue) appendLocal(sid, text, "grok is running…");
     else {
       setDetail((prev) => {
@@ -833,10 +857,11 @@ export function AppShell({ user }: Props) {
   async function deleteSession(id: string) {
     const gen = selectGen.current;
     await api(`/api/sessions/${id}`, { method: "DELETE" });
+    dropStream(id);
     slotsRef.current.delete(id);
     const list = await refreshLists();
     if (selectionStale(gen)) return;
-    if (selectedRef.current === id || selectedId === id) {
+    if (selectedRef.current === id) {
       const next = list[0];
       if (next) await switchTo(next.id);
       else {
