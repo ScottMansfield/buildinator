@@ -80,10 +80,18 @@ function dropLastUserTurn(t: Transcript): void {
 }
 
 function acpText(content: unknown): string {
+  if (content == null) return "";
   if (typeof content === "string") return content;
-  if (content && typeof content === "object" && "text" in content) {
-    const text = (content as { text?: unknown }).text;
-    if (typeof text === "string") return text;
+  if (typeof content === "number" || typeof content === "boolean") return String(content);
+  if (Array.isArray(content)) return content.map(acpText).join("");
+  if (typeof content === "object") {
+    const o = content as Record<string, unknown>;
+    if (typeof o.text === "string") return o.text;
+    if (typeof o.text === "object") return acpText(o.text);
+    if (typeof o.content === "string") return o.content;
+    if (Array.isArray(o.content) || (o.content && typeof o.content === "object")) {
+      return acpText(o.content);
+    }
   }
   return "";
 }
@@ -294,7 +302,7 @@ function compactTranscriptSeed(t: Transcript, currentPrompt: string): string {
   const blocks: string[] = [];
   for (const m of recent) {
     let text = m.content.trim();
-    if (text.length > SEED_MSG_CHARS) text = text.slice(0, SEED_MSG_CHARS) + "…";
+    if (text.length > SEED_MSG_CHARS) text = text.slice(0, SEED_MSG_CHARS) + "\u2026";
     blocks.push(`${m.role === "user" ? "USER" : "ASSISTANT"}: ${text}`);
   }
   let body = blocks.join("\n\n");
@@ -464,18 +472,20 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
     const now = new Date().toISOString();
     const kind = update.sessionUpdate;
 
-    if (kind === "agent_message_chunk") {
+    if (kind === "agent_message_chunk" || kind === "agent_message" || kind === "message") {
       closeTurnThoughts(t, thoughtIds, now);
       const key = update.messageId || "default";
       let id = assistantIds.get(key);
-      const chunk = acpText(update.content);
+      const chunk = acpText(update.content) || acpText(update.text);
+      if (!chunk && kind === "agent_message_chunk") return;
+      const replace = kind !== "agent_message_chunk";
       if (!id) {
         id = newId();
         assistantIds.set(key, id);
         t.messages.push({ id, role: "assistant", content: chunk, createdAt: now });
       } else {
         const msg = t.messages.find((m) => m.id === id);
-        if (msg) msg.content += chunk;
+        if (msg) msg.content = replace ? chunk || msg.content : msg.content + chunk;
       }
       const msg = t.messages.find((m) => m.id === id);
       emit(sessionId, { type: "activity", phase: "writing" });
@@ -810,12 +820,17 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
         content: message,
         createdAt: now,
       });
-      updateSessionMeta(sessionId, { status: "error", updatedAt: now });
+      const hasOutput = t.messages.some((m) => m.role === "assistant" && m.content.trim());
+      // Sticky sqlite "error" paints the bottom chip forever. If grok already
+      // streamed a reply, treat a trailing RPC failure as idle + a notice.
+      const status = hasOutput ? "idle" : "error";
+      updateSessionMeta(sessionId, { status, updatedAt: now });
       const updated = getAccessibleSummary(user.id, sessionId);
       if (updated) touchInfo(t, updated);
       saveTranscript(sessionId, t);
-      emit(sessionId, { type: "status", status: "error" });
-      emit(sessionId, { type: "error", message });
+      emit(sessionId, { type: "status", status });
+      if (hasOutput) emit(sessionId, { type: "done", stopReason: "error" });
+      else emit(sessionId, { type: "error", message });
     }
   }
 
@@ -832,7 +847,7 @@ export class MockGrokBuildAdapter implements GrokBuildAdapter {
     requireAccountWrite(user.role);
     const trimmed = name.trim();
     if (!trimmed || trimmed.length > 40) {
-      throw new AclError(400, "project name must be 1–40 characters");
+      throw new AclError(400, "project name must be 1\u201340 characters");
     }
     if (!/^[A-Za-z0-9][A-Za-z0-9 _.-]*$/.test(trimmed)) {
       throw new AclError(400, "project name: letters, numbers, space, . _ -");
